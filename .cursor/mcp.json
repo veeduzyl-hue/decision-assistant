@@ -1,0 +1,10 @@
+{
+    "mcpServers": {
+      "decision-assistant": {
+        "command": "node",
+        "args": ["dist/server.js"],
+        "cwd": "D:\\AI project\\decision-assistant"
+      }
+    }
+  }
+  

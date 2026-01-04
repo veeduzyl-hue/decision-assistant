@@ -1,0 +1,7 @@
+{
+    "ship_gap_days": 5,
+    "refactor_commits_ratio": 0.72,
+    "todo_growth_ratio": 0.35,
+    "churn_ratio": 0.42
+  }
+  

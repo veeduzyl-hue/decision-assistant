@@ -1,0 +1,41 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "schemas/plan.json",
+    "title": "refactor_decision.plan",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": { "$ref": "common.json#/definitions/Decision" },
+          "repo_summary": { "$ref": "common.json#/definitions/RepoSummary" },
+          "signals": { "$ref": "common.json#/definitions/Signals" },
+          "answers": { "$ref": "common.json#/definitions/Answers" },
+          "scope": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "focus_files": { "type": "array", "items": { "type": "string" }, "default": [] },
+              "non_goals": { "type": "array", "items": { "type": "string" }, "default": [] }
+            }
+          }
+        },
+        "required": ["decision", "signals"]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "artifacts": { "type": "array", "items": { "$ref": "common.json#/definitions/Artifact" } },
+          "host_actions": { "type": "array", "items": { "$ref": "common.json#/definitions/HostAction" } },
+          "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
+          "rollback_plan": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["artifacts", "host_actions", "acceptance_criteria"]
+      }
+    },
+    "required": ["input", "output"]
+  }
+  

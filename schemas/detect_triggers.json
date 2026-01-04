@@ -1,0 +1,31 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "schemas/detect_triggers.json",
+    "title": "refactor_decision.detect_triggers",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "utterance": { "type": "string", "default": "" },
+          "signals": { "$ref": "common.json#/definitions/Signals" }
+        },
+        "required": ["utterance", "signals"]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "should_intervene": { "type": "boolean" },
+          "intervention_level": { "$ref": "common.json#/definitions/InterventionLevel" },
+          "reason": { "type": "string" },
+          "questions": { "type": "array", "items": { "type": "string" }, "maxItems": 2 }
+        },
+        "required": ["should_intervene", "intervention_level", "reason"]
+      }
+    },
+    "required": ["input", "output"]
+  }
+  

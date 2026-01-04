@@ -1,0 +1,35 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "schemas/assess.json",
+    "title": "refactor_decision.assess",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repo_summary": { "$ref": "common.json#/definitions/RepoSummary" },
+          "signals": { "$ref": "common.json#/definitions/Signals" },
+          "answers": { "$ref": "common.json#/definitions/Answers" }
+        },
+        "required": ["signals"]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": { "$ref": "common.json#/definitions/Decision" },
+          "risk_score": { "type": "number", "minimum": 0, "maximum": 100 },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "top_reasons": { "type": "array", "items": { "type": "string" }, "maxItems": 5 },
+          "missing_info_questions": { "type": "array", "items": { "type": "string" }, "maxItems": 4 },
+          "recommended_timebox_weeks": { "type": "integer", "minimum": 1, "maximum": 6 },
+          "suggested_scope_targets": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["decision", "risk_score", "confidence", "top_reasons"]
+      }
+    },
+    "required": ["input", "output"]
+  }
+  

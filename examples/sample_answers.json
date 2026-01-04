@@ -1,0 +1,6 @@
+{
+    "expected_rule_id": "refactor_time_blackhole",
+    "expected_hit": true,
+    "expected_min_reasons": 2
+  }
+  
