@@ -1,4 +1,4 @@
-✅ Decision Assistant（v0.1）
+```markdown
 # Decision Assistant
 
 A Cursor MCP plugin that helps developers avoid **refactor time black holes**  
@@ -22,12 +22,10 @@ Before you start refactoring, the assistant may produce:
     "Set explicit refactor exit criteria"
   ]
 }
-
 This happens when the assistant detects a pattern that often leads to
 over-investment, scope creep, or delayed delivery.
 
-## What it does
-
+What it does
 Decision Assistant operates as a decision layer inside Cursor:
 
 Detects refactor risk signals
@@ -41,6 +39,8 @@ Encourages conscious stopping when signal is insufficient
 It is designed to surface uncertainty, not hide it.
 
 ## Installation
+
+```bash
 git clone https://github.com/veeduzyl-hue/decision-assistant
 cd decision-assistant
 npm install
@@ -48,7 +48,7 @@ npm run build
 
 Register the MCP server in Cursor via .cursor/mcp.json.
 
-## Philosophy
+Philosophy
 Decision Assistant is allowed to say:
 
 “Not enough signal”
@@ -63,8 +63,7 @@ This is the product working as intended.
 Good engineering decisions are not about being smart.
 They are about knowing when to stop.
 
-## Who is this for?
-
+Who is this for?
 Indie developers
 
 Startup engineers
@@ -75,22 +74,19 @@ Anyone who has ever thought:
 
 “I think this refactor is necessary… but I’m not sure anymore.”
 
-## Status
-
+Status
 🟢 v0.1 — Working MVP
 
 🟡 Rules and scoring are evolving
 
 🔵 Open for early adopters and feedback
 
-## Roadmap (high level)
-
+Roadmap (high level)
 v0.2: Productization & early adoption
 
 v0.3+: Exploratory
 
 The roadmap reflects direction, not promises.
 
-##License
-
+License
 MIT
