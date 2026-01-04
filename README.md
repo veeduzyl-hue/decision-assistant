@@ -1,4 +1,4 @@
-✅ Decision Assistant（v0.1 · Working MVP）
+✅ Decision Assistant（v0.1）
 # Decision Assistant
 
 A Cursor MCP plugin that helps developers avoid **refactor time black holes**  
@@ -23,11 +23,10 @@ Before you start refactoring, the assistant may produce:
   ]
 }
 
-
 This happens when the assistant detects a pattern that often leads to
 over-investment, scope creep, or delayed delivery.
 
-What it does
+## What it does
 
 Decision Assistant operates as a decision layer inside Cursor:
 
@@ -41,56 +40,15 @@ Encourages conscious stopping when signal is insufficient
 
 It is designed to surface uncertainty, not hide it.
 
-Installation
-1. Clone and build
+## Installation
 git clone https://github.com/veeduzyl-hue/decision-assistant
 cd decision-assistant
 npm install
 npm run build
 
-2. Register the MCP server in Cursor
+Register the MCP server in Cursor via .cursor/mcp.json.
 
-Create or edit:
-
-.cursor/mcp.json
-
-{
-  "mcpServers": {
-    "decision-assistant": {
-      "command": "node",
-      "args": ["dist/server.js"],
-      "cwd": "/path/to/decision-assistant"
-    }
-  }
-}
-
-
-Restart Cursor and enable the MCP server.
-
-Detailed setup notes will be expanded in docs/.
-
-Usage
-
-Decision Assistant exposes four MCP tools:
-
-detect_triggers
-
-assess
-
-plan
-
-followup
-
-They can be invoked:
-
-Manually via Cursor
-
-Via scripts (experimental)
-
-Automatically (planned)
-
-Philosophy
-
+## Philosophy
 Decision Assistant is allowed to say:
 
 “Not enough signal”
@@ -105,7 +63,7 @@ This is the product working as intended.
 Good engineering decisions are not about being smart.
 They are about knowing when to stop.
 
-Who is this for?
+## Who is this for?
 
 Indie developers
 
@@ -117,15 +75,15 @@ Anyone who has ever thought:
 
 “I think this refactor is necessary… but I’m not sure anymore.”
 
-Status
+## Status
 
 🟢 v0.1 — Working MVP
 
-🟡 Scoring and rules are evolving
+🟡 Rules and scoring are evolving
 
 🔵 Open for early adopters and feedback
 
-Roadmap (high level)
+## Roadmap (high level)
 
 v0.2: Productization & early adoption
 
@@ -133,6 +91,6 @@ v0.3+: Exploratory
 
 The roadmap reflects direction, not promises.
 
-License
+##License
 
 MIT
