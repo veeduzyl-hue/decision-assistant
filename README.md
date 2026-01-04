@@ -1,3 +1,4 @@
+Early adopters welcome. Feedback drives v0.2.
 # Decision Assistant
 
 A Cursor MCP plugin that helps developers avoid **refactor time black holes**  
@@ -153,3 +154,7 @@ The roadmap reflects direction, not promises.
 ## License
 
 MIT
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for how to propose new decision rules.
