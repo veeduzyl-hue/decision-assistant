@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import type { AppState, ArtifactRecord, ArtifactType } from "./model";
+import type { AppState, ArtifactRecord, ArtifactType } from "./model.js";
 
 const DEFAULT_STATE: AppState = {
   version: "0.1.0",
