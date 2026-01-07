@@ -13,6 +13,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import type { TriggerSignals } from "./rules/refactor_time_black_hole.js";
 
+import { LIMITS } from "./config/index.js";
 const STATE_FILE = ".decision_assistant/state.json";
 
 /**
@@ -158,10 +159,33 @@ async function main() {
       const toolName: string = request.params.name;
       const args: ToolCallArgs = request.params.arguments;
 
+      // ---- v0.2 security: clamp incoming arguments to reduce ReDoS/DoS risk ----
+
+
+      function clampText(input: unknown): unknown {
+        if (typeof input === "string") {
+          return input.length > LIMITS.MAX_TEXT_LENGTH
+            ? input.slice(0, LIMITS.MAX_TEXT_LENGTH)
+            : input;
+        }
+        if (Array.isArray(input)) return input.map(clampText);
+        if (input && typeof input === "object") {
+          return Object.fromEntries(
+            Object.entries(input as Record<string, unknown>).map(
+              ([k, v]) => [k, clampText(v)]
+            )
+          );
+        }
+        return input;
+      }
+      
+
+const safeArgs = clampText(args) as ToolCallArgs;
+
       switch (toolName) {
         case "detect_triggers": {
           const out = detectTriggers({
-            signals: (args as any)?.signals as TriggerSignals | undefined,
+            signals: (safeArgs as any)?.signals as TriggerSignals | undefined
           });
           appendArtifact(STATE_FILE, "signal", out);
           return {
