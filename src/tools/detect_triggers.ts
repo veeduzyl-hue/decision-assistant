@@ -1,4 +1,4 @@
-import type { TriggerSignals } from "../rules/refactor_time_black_hole";
+import type { TriggerSignals } from "../rules/refactor_time_black_hole.js";
 
 /**
  * v0.1：Cursor 侧输入通常是自然语言 + 少量结构化上下文
