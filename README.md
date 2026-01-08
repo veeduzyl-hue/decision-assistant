@@ -1,160 +1,149 @@
-Early adopters welcome. Feedback drives v0.2.
 # Decision Assistant
 
-A Cursor MCP plugin that helps developers avoid **refactor time black holes**  
-by intervening at **decision time**, not code time.
+**Decision Assistant** is a deterministic decision infrastructure that helps
+developers detect high-risk engineering behavior and enforce explicit execution
+boundaries.
 
-Decision Assistant does not refactor your code.  
-It helps you decide **whether you should refactor at all**.
+It is designed to answer a simple but critical question:
+
+> *Should this change proceed as-is, require explicit confirmation, or be blocked?*
 
 ---
 
-## Example
+## Why Decision Assistant Exists
 
-Before you start refactoring, the assistant may produce:
+Many development risks are not caused by lack of intelligence, but by
+**implicit execution**:
+
+- Large refactors proceed without clear exit criteria
+- Risk accumulates gradually and becomes invisible
+- “Just one more change” crosses a cost boundary silently
+
+Decision Assistant makes these boundaries **explicit, deterministic, and reviewable**.
+
+---
+
+## Core Concepts (v0.2)
+
+### 1. Deterministic Decision Infra
+
+Decision Assistant evaluates low-level engineering signals (e.g. change
+amplification) and maps them into **policy actions**:
+
+- `ALLOW`
+- `WARN`
+- `BLOCK`
+
+This layer is fully deterministic and does not rely on LLM reasoning.
+
+---
+
+### 2. Guardrail with Explicit Confirmation
+
+Policy actions are upgraded into **guardrail decisions**:
+
+| policy.action | guardrail.action |
+|---------------|------------------|
+| `ALLOW`       | `ALLOW`          |
+| `WARN`        | `REQUIRE_CONFIRM`|
+| `BLOCK`       | `BLOCK`          |
+
+When confirmation is required, execution is **paused by default**.
+
+---
+
+### 3. Guardrail Receipt Protocol
+
+Instead of a boolean “confirm” flag, v0.2 introduces a **receipt-based protocol**.
+
+When a guardrail requires confirmation, the tool returns a receipt:
 
 ```json
 {
-  "risk_score": 38,
-  "decision": "SCOPED_REFACTOR",
-  "plan": [
-    "Define a 2–4 hour shippable slice",
-    "Set explicit refactor exit criteria"
-  ]
+  "receipt_id": "gr_...",
+  "plan_hash": "plan_...",
+  "scope": "this_call_only"
 }
 ```
 
-This happens when the assistant detects a pattern that often leads to  
-over-investment, scope creep, or delayed delivery.
-
----
-
-## What it does
-
-Decision Assistant operates as a decision layer inside Cursor:
-
-- Detects refactor risk signals  
-- Assesses likelihood of wasted effort  
-- Suggests scoped, shippable next steps  
-- Encourages conscious stopping when signal is insufficient  
-
-It is designed to surface uncertainty, not hide it.
-
----
-
-## Installation
-
-```bash
-git clone https://github.com/veeduzyl-hue/decision-assistant
-cd decision-assistant
-npm install
-npm run build
-```
-
-Register the MCP server in Cursor via `.cursor/mcp.json`.
-
-Example `.cursor/mcp.json`:
+Execution is only permitted when the caller explicitly confirms **the same plan**:
 
 ```json
 {
-  "mcpServers": {
-    "decision-assistant": {
-      "command": "node",
-      "args": ["dist/server.js"],
-      "cwd": "/path/to/decision-assistant"
-    }
+  "confirm": {
+    "mode": "EXECUTE",
+    "receipt_id": "gr_...",
+    "plan_hash": "plan_..."
   }
 }
 ```
 
-Restart Cursor and enable the MCP server.
+This prevents accidental or stale confirmations.
+
+---
+
+## Default Guardrail Thresholds
+
+v0.2 ships with **stable defaults** for change amplification:
+
+| files_touched | Behavior |
+|---------------|----------|
+| `< 8`         | Allow execution |
+| `>= 8`        | Require explicit confirmation |
+| `>= 16`       | Block execution |
+
+These thresholds are treated as **defaults**, not user-tunable parameters in v0.2.
 
 ---
 
 ## Usage
 
-Decision Assistant exposes four MCP tools:
-
-- `detect_triggers`
-- `assess`
-- `plan`
-- `followup`
-
-You can invoke them:
-
-- Manually via Cursor
-- Via scripts (e.g. `handshake_full.mjs`)
-- Automatically (future)
-
----
-
-## Decision Memory
-
-All decisions are stored locally:
-
-```
-.decision_assistant/
-  ├── state.json
-  └── decision.md
+### Build
+```bash
+npm run build
 ```
 
-This enables:
+### Verify guardrail behavior
+```bash
+npm run verify:guardrail
+```
 
-- Decision history
-- Refactor cooldown logic
-- Long-term self-awareness of engineering habits
-
----
-
-## Philosophy
-
-Decision Assistant is allowed to say:
-
-- “Not enough signal”
-- “You should stop”
-- “No action recommended”
-
-This is not a failure.  
-This is the product working as intended.
-
-Good engineering decisions are not about being smart.  
-They are about knowing when to stop.
+### Test MCP assess flow
+```bash
+npx tsx scripts/mcp_call_assess.ts
+npx tsx scripts/mcp_call_assess.ts --auto
+```
 
 ---
 
-## Who is this for?
+## Design Principles
 
-- Indie developers
-- Startup engineers
-- Tech leads
+- **Determinism over heuristics**
+- **Explicit confirmation over implicit execution**
+- **Protocols over ad-hoc prompts**
+- **Late but confident intervention**
 
-Anyone who has ever thought:
+Decision Assistant is not a linter, optimizer, or code generator.
+It is an execution boundary.
 
-> “I think this refactor is necessary… but I’m not sure anymore.”
+---
+
+## Documentation
+
+- Guardrail Receipt Protocol: `docs/guardrail_protocol.md`
+- Decision Rules: `docs/decision_rules.md`
+- Configuration & defaults: `docs/config.md`
 
 ---
 
 ## Status
 
-- 🟢 v0.1 — Working MVP
-- 🟡 Rules and scoring are evolving
-- 🔵 Open for early adopters and feedback
-
----
-
-## Roadmap (high level)
-
-- v0.2: Productization & early adoption
-- v0.3+: Exploratory
-
-The roadmap reflects direction, not promises.
+- Current version: **v0.2.0**
+- Stability: Experimental but protocol-stable
+- Intended users: Independent developers and small teams
 
 ---
 
 ## License
 
 MIT
-
-## Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for how to propose new decision rules.
