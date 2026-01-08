@@ -1,3 +1,4 @@
+import { defaultConfig } from "../config/defaults.js";
 import type { AppConfig } from "../config/defaults.js";
 import { evaluateRefactorTimeBlackhole } from "../rules/refactor_time_black_hole.js";
 import type { TriggerSignals } from "../rules/refactor_time_black_hole.js";
@@ -6,77 +7,137 @@ import { computeRiskScore } from "../scoring/risk_score.js";
 import { decide } from "../scoring/decision.js";
 import type { Signals, Answers } from "../scoring/types.js";
 
+// v0.2 infra + guardrail
+import { evaluate } from "../infra/engine/evaluate.js";
+import { evaluateGuardrail } from "../guardrail/evaluate_guardrail.js";
+import type { DecisionSignal, PolicyDecision } from "../infra/types/index.js";
+import type { GuardrailDecision, GuardrailReceipt } from "../guardrail/types.js";
+
 // 关键：不用 node: 前缀，避免你环境里再次触发兼容性红线
 import { existsSync } from "fs";
 import { join } from "path";
+import { createHash, randomUUID } from "crypto";
+
+/**
+ * confirm 语义收敛：
+ * - ACK：仅确认收到 REQUIRE_CONFIRM（不放行）
+ * - EXECUTE：带 receipt 签收并放行（需校验 plan_hash）
+ */
+export type ConfirmInput =
+  | {
+      mode: "ACK";
+      receipt_id?: string;
+      plan_hash?: string;
+    }
+  | {
+      mode: "EXECUTE";
+      receipt_id: string;
+      plan_hash: string;
+    };
 
 export type AssessInput = {
   config: AppConfig;
   signals: TriggerSignals;
   answers?: Answers;
+  confirm?: ConfirmInput;
 };
 
 export type AssessOutput = {
   rule_hit: ReturnType<typeof evaluateRefactorTimeBlackhole>;
   risk: ReturnType<typeof computeRiskScore>;
   decision: ReturnType<typeof decide>;
+  infraSignals: DecisionSignal[];
+  policy: PolicyDecision;
+  guardrail: GuardrailDecision;
 };
 
+/* ------------------------------------------------------------------ */
+/* Receipt helpers                                                     */
+/* ------------------------------------------------------------------ */
+
+function stableStringify(obj: unknown): string {
+  const seen = new WeakSet<object>();
+  const sorter = (value: any): any => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== "object") return value;
+    if (Array.isArray(value)) return value.map(sorter);
+    if (seen.has(value)) return "[Circular]";
+    seen.add(value);
+    const keys = Object.keys(value).sort();
+    const out: Record<string, any> = {};
+    for (const k of keys) out[k] = sorter(value[k]);
+    return out;
+  };
+  return JSON.stringify(sorter(obj));
+}
+
+function sha256Short(input: string, len = 12): string {
+  return createHash("sha256").update(input).digest("hex").slice(0, len);
+}
+
+function makeReceiptId(): string {
+  return `gr_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+}
+
 /**
- * v0.1 映射：
- * TriggerSignals（扁平） → scoring 所需的 Signals（结构化）
- * 目标：单调一致、可解释、不制造反直觉风险
+ * 用“计划摘要”生成 plan_hash：
+ * 目标：用户签收的是“同一份计划”，不是一个布尔开关。
  */
+function buildPlanHash(args: {
+  infraSignals: DecisionSignal[];
+  policy: PolicyDecision;
+  guardrail: GuardrailDecision;
+}): string {
+  const planSummary = {
+    infraSignals: args.infraSignals,
+    policy: {
+      action: args.policy.action,
+      reason: args.policy.reason,
+      suggestedExits: (args.policy as any)?.suggestedExits ?? [],
+    },
+    guardrail: {
+      action: args.guardrail.action,
+      reason: (args.guardrail as any)?.reason,
+    },
+  };
+  return `plan_${sha256Short(stableStringify(planSummary))}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Signal mappings                                                     */
+/* ------------------------------------------------------------------ */
+
 function toSignalsV01(ts: TriggerSignals): Signals {
   const evo: any = {};
   const str: any = {};
   const cpx: any = {};
 
-  // =====================================================
   // A) Time Sink Risk
-  // =====================================================
+
   evo.refactor_days = Number((ts as any).refactor_days ?? 0);
   evo.no_user_feature_delivery_days = Number((ts as any).ship_gap_days ?? 0);
 
-  // decision.md 位置：.decision_assistant/decision.md
-  const decisionFilePath = join(
-    process.cwd(),
-    ".decision_assistant",
-    "decision.md"
-  );
+  const decisionFilePath = join(process.cwd(), ".decision_assistant", "decision.md");
   evo.decision_file_missing = !existsSync(decisionFilePath);
   evo.decision_file_invalid = false;
-
-  // decide() 的硬条件之一（v0.1 暂保守）
   evo.refactor_scope_expanding = false;
 
-  // =====================================================
   // B) Change Amplification Risk
-  // 启发式映射：重构比例 & churn → 影响面
-  // =====================================================
   evo.files_touched_per_change_median = Math.min(
     10,
     Math.round(((ts as any).refactor_commits_ratio ?? 0) * 10)
   );
-
   evo.same_module_touch_count_14d = Math.min(
     20,
     Math.round(((ts as any).churn_ratio ?? 0) * 20)
   );
 
-  // =====================================================
   // C) Rework Risk
-  // churn → 返工/回滚概率
-  // =====================================================
   const churn = Number((ts as any).churn_ratio ?? 0);
-  if (churn >= 0.5) evo.rollback_or_rework_events_14d = 3;
-  else if (churn >= 0.35) evo.rollback_or_rework_events_14d = 2;
-  else if (churn >= 0.2) evo.rollback_or_rework_events_14d = 1;
-  else evo.rollback_or_rework_events_14d = 0;
+  evo.rollback_or_rework_events_14d =
+    churn >= 0.5 ? 3 : churn >= 0.35 ? 2 : churn >= 0.2 ? 1 : 0;
 
-  // =====================================================
   // D) Smell Hints
-  // =====================================================
   str.duplicated_logic_hint = Number((ts as any).todo_growth_ratio ?? 0) >= 0.3;
   str.module_boundary_smell = Number((ts as any).refactor_commits_ratio ?? 0) >= 0.6;
 
@@ -84,45 +145,185 @@ function toSignalsV01(ts: TriggerSignals): Signals {
   cpx.parameter_bloat_hint = false;
   cpx.workaround_comment_hint = false;
 
-  // =====================================================
-  // Defaults（v0.1 占位）
-  // =====================================================
+  // Defaults
   str.dependency_cycles = 0;
   str.hotspot_files = 0;
   str.test_coverage_low = false;
-
   cpx.cognitive_complexity_high = false;
   cpx.large_diff_ratio = 0;
 
-  return {
-    evolution: evo,
-    structure: str,
-    complexity: cpx,
-  } as Signals;
+  return { evolution: evo, structure: str, complexity: cpx } as Signals;
 }
 
+function toInfraSignals(ts: TriggerSignals): DecisionSignal[] {
+  const infraSignals: DecisionSignal[] = [];
+  const ft = (ts as any).files_touched;
+  if (typeof ft === "number" && Number.isFinite(ft)) {
+    infraSignals.push({
+      kind: "files_touched",
+      value: ft,
+      context: { source: "TriggerSignals" },
+    });
+  }
+  return infraSignals;
+}
+
+/* ------------------------------------------------------------------ */
+/* assess                                                              */
+/* ------------------------------------------------------------------ */
+
 export function assess(input: AssessInput): AssessOutput {
-  // 1) 业务规则：重构时间黑洞
+  // 1) v0.1 rule
   const rule_hit = evaluateRefactorTimeBlackhole(input.config, input.signals);
 
-  // 2) scoring：结构化信号
+  // 2) scoring
   const signalsForScoring = toSignalsV01(input.signals);
-
   const risk = computeRiskScore(signalsForScoring, input.answers);
   const decisionRaw = decide(signalsForScoring, input.answers);
 
-  // 3) v0.1 决策融合：规则兜底，避免“命中黑洞却 SHIP”
-  const decision =
-    rule_hit.hit && (decisionRaw as any).decision === "SHIP"
+  // 3) rule override (type-stable)
+  const decision: ReturnType<typeof decide> =
+    rule_hit.hit && decisionRaw.decision === "SHIP"
       ? {
-          ...(decisionRaw as any),
-          decision: "SCOPED_REFACTOR",
+          ...decisionRaw,
+          decision: ("SCOPED_REFACTOR" as (typeof decisionRaw)["decision"]),
           reasons: [
-            ...(((decisionRaw as any).reasons ?? []) as string[]),
-            "[rule_override] Refactor Time Blackhole rule hit; override SHIP -> SCOPED_REFACTOR (v0.1).",
+            ...(decisionRaw.reasons ?? []),
+            "[rule_override] Refactor Time Blackhole rule hit; override SHIP -> SCOPED_REFACTOR.",
           ],
         }
       : decisionRaw;
 
-  return { rule_hit, risk, decision } as AssessOutput;
+  // 4) v0.2 infra + guardrail
+  const infraSignals = toInfraSignals(input.signals);
+  const policy = evaluate(infraSignals, defaultConfig);
+  const guardrailBase = evaluateGuardrail({ infraSignals, policy });
+
+  /**
+   * -------------------------
+   * REQUIRE_CONFIRM behavior
+   * -------------------------
+   * 约定：
+   * - REQUIRE_CONFIRM 必须返回 receipt + executed:false + confirmation.required:true
+   * - EXECUTE 放行后，ALLOW 的 receipt_id 必须复用用户签收的 confirm.receipt_id（不得换单号）
+   */
+  if (guardrailBase.action === "REQUIRE_CONFIRM") {
+    const plan_hash = buildPlanHash({ infraSignals, policy, guardrail: guardrailBase });
+
+    // helper：仅在需要“发新回执”时生成
+    const newReceipt = (): GuardrailReceipt => ({
+      receipt_id: makeReceiptId(),
+      plan_hash,
+      scope: "this_call_only",
+    });
+
+    const confirm = input.confirm;
+
+    // (A) 首次：无 confirm → 发新回执
+    if (!confirm) {
+      const receipt = newReceipt();
+      return {
+        rule_hit,
+        risk,
+        decision,
+        infraSignals,
+        policy,
+        guardrail: {
+          action: "REQUIRE_CONFIRM",
+          reason: guardrailBase.reason,
+          receipt,
+          executed: false,
+          confirmation: { required: true },
+        },
+      };
+    }
+
+    // (B) ACK：仅确认收到 → 仍发新回执（用户需对“最新回执”进行 EXECUTE）
+    if (confirm.mode === "ACK") {
+      const receipt = newReceipt();
+      return {
+        rule_hit,
+        risk,
+        decision,
+        infraSignals,
+        policy,
+        guardrail: {
+          action: "REQUIRE_CONFIRM",
+          reason: guardrailBase.reason,
+          receipt,
+          executed: false,
+          confirmation: {
+            required: true,
+            acknowledged: true,
+            ack_receipt_id: confirm.receipt_id,
+          },
+        },
+      };
+    }
+
+    // (C) EXECUTE：校验 plan_hash
+    if (confirm.mode === "EXECUTE") {
+      // 校验失败：拒绝并发新回执
+      if (confirm.plan_hash !== plan_hash) {
+        const receipt = newReceipt();
+        return {
+          rule_hit,
+          risk,
+          decision,
+          infraSignals,
+          policy,
+          guardrail: {
+            action: "REQUIRE_CONFIRM",
+            reason:
+              guardrailBase.reason +
+              " (confirmation rejected: receipt is stale or plan changed)",
+            receipt,
+            executed: false,
+            confirmation: {
+              required: true,
+              rejected: true,
+              error: "STALE_RECEIPT_OR_PLAN_CHANGED",
+              provided: { receipt_id: confirm.receipt_id, plan_hash: confirm.plan_hash },
+              expected: { plan_hash },
+            },
+          },
+        };
+      }
+
+      // ✅ 放行：复用用户签收的 receipt_id（不得换单号）
+      return {
+        rule_hit,
+        risk,
+        decision,
+        infraSignals,
+        policy,
+        guardrail: {
+          action: "ALLOW",
+          reason: `User confirmed execution for plan_hash ${plan_hash}.`,
+          receipt: {
+            receipt_id: confirm.receipt_id,
+            plan_hash,
+            scope: "this_call_only",
+          },
+          executed: true,
+          confirmation: {
+            required: false,
+            confirmed: true,
+            confirmed_plan_hash: plan_hash,
+            confirmed_receipt_id: confirm.receipt_id,
+          },
+        },
+      };
+    }
+  }
+
+  // default
+  return {
+    rule_hit,
+    risk,
+    decision,
+    infraSignals,
+    policy,
+    guardrail: guardrailBase,
+  };
 }

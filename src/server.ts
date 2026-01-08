@@ -14,11 +14,12 @@ import { z } from "zod";
 import type { TriggerSignals } from "./rules/refactor_time_black_hole.js";
 
 import { LIMITS } from "./config/index.js";
+
 const STATE_FILE = ".decision_assistant/state.json";
 
 /**
  * SDK 1.25.1 的 setRequestHandler 要求：
- * - request schema 必须包含 method 的 z.literal(...)（method literal）
+ * - request schema 必须包含 method 的 z.literal(...)
  * - 并且 request schema 需要挂载 result schema： (schema as any).result = ResultSchema
  *   否则 SDK 在校验 handler 返回值时会读到 undefined，从而报 _zod 错误
  */
@@ -26,7 +27,6 @@ const STATE_FILE = ".decision_assistant/state.json";
 // -------------------- Request Schemas (Envelope) --------------------
 const ToolsListRequestSchema = z.object({
   method: z.literal("tools/list"),
-  // params 通常为空；为兼容，允许缺省或空对象
   params: z.object({}).optional(),
 });
 
@@ -44,13 +44,14 @@ const ToolsListResultSchema = z.object({
     z.object({
       name: z.string(),
       description: z.string().optional(),
-      // MCP tools/list 返回的 inputSchema 本质是 JSON Schema 对象，这里允许 unknown 以兼容 v0.1
       inputSchema: z.unknown().optional(),
     })
   ),
 });
 
+// NOTE: 关键修复：允许 isError（用于 Guardrail 阻断时的“强制对话阻断”）
 const ToolsCallResultSchema = z.object({
+  isError: z.boolean().optional(),
   content: z.array(
     z.object({
       type: z.literal("text"),
@@ -65,6 +66,79 @@ const ToolsCallResultSchema = z.object({
 
 type ToolCallArgs = Record<string, unknown> | undefined;
 
+// ---- v0.2 security: clamp incoming arguments to reduce ReDoS/DoS risk ----
+function clampText(input: unknown): unknown {
+  if (typeof input === "string") {
+    return input.length > LIMITS.MAX_TEXT_LENGTH
+      ? input.slice(0, LIMITS.MAX_TEXT_LENGTH)
+      : input;
+  }
+  if (Array.isArray(input)) return input.map(clampText);
+  if (input && typeof input === "object") {
+    return Object.fromEntries(
+      Object.entries(input as Record<string, unknown>).map(([k, v]) => [
+        k,
+        clampText(v),
+      ])
+    );
+  }
+  return input;
+}
+
+/**
+ * confirm 入参（行为层）：
+ * - 不传：首次调用，拿 receipt
+ * - ACK：仅确认收到（不放行）
+ * - EXECUTE：带 receipt 签收并放行（需 receipt_id + plan_hash）
+ *
+ * 兼容旧版：confirm: true/false
+ * - true：提示用户改用 receipt 形态（不会放行）
+ * - false/undefined：等价于不传
+ */
+type ConfirmArg =
+  | boolean
+  | {
+      mode?: unknown;
+      receipt_id?: unknown;
+      plan_hash?: unknown;
+    };
+
+function normalizeConfirm(confirmRaw: ConfirmArg | undefined):
+  | undefined
+  | { mode: "ACK"; receipt_id?: string; plan_hash?: string }
+  | { mode: "EXECUTE"; receipt_id: string; plan_hash: string }
+  | { mode: "INVALID_LEGACY_TRUE" } {
+  if (confirmRaw === undefined) return undefined;
+
+  if (typeof confirmRaw === "boolean") {
+    if (confirmRaw === true) return { mode: "INVALID_LEGACY_TRUE" };
+    return undefined;
+  }
+
+  const mode = String((confirmRaw as any)?.mode ?? "");
+  const receipt_id = (confirmRaw as any)?.receipt_id;
+  const plan_hash = (confirmRaw as any)?.plan_hash;
+
+  if (mode === "ACK") {
+    return {
+      mode: "ACK",
+      receipt_id: typeof receipt_id === "string" ? receipt_id : undefined,
+      plan_hash: typeof plan_hash === "string" ? plan_hash : undefined,
+    };
+  }
+
+  if (mode === "EXECUTE") {
+    if (typeof receipt_id === "string" && typeof plan_hash === "string") {
+      return { mode: "EXECUTE", receipt_id, plan_hash };
+    }
+    // 形态不完整
+    return { mode: "INVALID_LEGACY_TRUE" };
+  }
+
+  // 未知 mode
+  return { mode: "INVALID_LEGACY_TRUE" };
+}
+
 async function main() {
   const config = loadConfig();
 
@@ -74,8 +148,6 @@ async function main() {
       version: config.app.version,
     },
     {
-      // v0.1：capabilities.tools 可以先留空；
-      // 工具清单由 tools/list 返回即可（更直观、更兼容）
       capabilities: {
         tools: {},
       },
@@ -99,6 +171,10 @@ async function main() {
                   refactor_commits_ratio: { type: "number" },
                   todo_growth_ratio: { type: "number" },
                   churn_ratio: { type: "number" },
+
+                  // 建议补齐：v0.1/v0.2 都会用到
+                  refactor_days: { type: "number" },
+                  files_touched: { type: "number" },
                 },
               },
             },
@@ -113,13 +189,27 @@ async function main() {
               signals: {
                 type: "object",
                 properties: {
-                  // v0.1: 这里列的是你最早 smoke 用的字段；
-                  // 实际 rule 还用到了 refactor_days（见你后续调试），建议你后续把它也补进 schema
+                  // v0.1 smoke fields
                   ship_gap_days: { type: "number" },
                   refactor_commits_ratio: { type: "number" },
                   todo_growth_ratio: { type: "number" },
                   churn_ratio: { type: "number" },
+
+                  // v0.1+ (rule) / v0.2 (infra)
                   refactor_days: { type: "number" },
+                  files_touched: { type: "number" },
+                },
+              },
+
+              // ✅ Guardrail confirmation (new contract)
+              confirm: {
+                type: "object",
+                description:
+                  "Guardrail receipt confirmation. Use mode=EXECUTE with receipt_id and plan_hash returned by REQUIRE_CONFIRM.",
+                properties: {
+                  mode: { type: "string", enum: ["ACK", "EXECUTE"] },
+                  receipt_id: { type: "string" },
+                  plan_hash: { type: "string" },
                 },
               },
             },
@@ -153,92 +243,162 @@ async function main() {
   });
 
   // tools/call
-  server.setRequestHandler(
-    ToolsCallRequestSchema as any,
-    async (request: any) => {
-      const toolName: string = request.params.name;
-      const args: ToolCallArgs = request.params.arguments;
+  server.setRequestHandler(ToolsCallRequestSchema as any, async (request: any) => {
+    const toolName: string = request.params.name;
+    const args: ToolCallArgs = request.params.arguments;
 
-      // ---- v0.2 security: clamp incoming arguments to reduce ReDoS/DoS risk ----
+    // ✅ 对所有工具统一进行 clamp（避免 assess 继续用原 args 导致 clamp 失效）
+    const safeArgs = clampText(args) as ToolCallArgs;
 
-
-      function clampText(input: unknown): unknown {
-        if (typeof input === "string") {
-          return input.length > LIMITS.MAX_TEXT_LENGTH
-            ? input.slice(0, LIMITS.MAX_TEXT_LENGTH)
-            : input;
-        }
-        if (Array.isArray(input)) return input.map(clampText);
-        if (input && typeof input === "object") {
-          return Object.fromEntries(
-            Object.entries(input as Record<string, unknown>).map(
-              ([k, v]) => [k, clampText(v)]
-            )
-          );
-        }
-        return input;
+    switch (toolName) {
+      case "detect_triggers": {
+        const out = detectTriggers({
+          signals: (safeArgs as any)?.signals as TriggerSignals | undefined,
+        });
+        appendArtifact(STATE_FILE, "signal", out);
+        return {
+          content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
+        };
       }
-      
 
-const safeArgs = clampText(args) as ToolCallArgs;
+      case "assess": {
+        const signals = (safeArgs as any)?.signals as TriggerSignals | undefined;
+        if (!signals) throw new Error("signals parameter is required");
 
-      switch (toolName) {
-        case "detect_triggers": {
-          const out = detectTriggers({
-            signals: (safeArgs as any)?.signals as TriggerSignals | undefined
-          });
-          appendArtifact(STATE_FILE, "signal", out);
+        // ✅ 新版 confirm（带 receipt 的签收）
+        const confirmNorm = normalizeConfirm((safeArgs as any)?.confirm as ConfirmArg | undefined);
+
+        // 传入 assess，让它生成 receipt / 校验 plan_hash / 放行（action=ALLOW）
+        const out = assess({ config, signals, confirm: confirmNorm as any });
+        appendArtifact(STATE_FILE, "decision", out);
+
+        const guardrail = (out as any)?.guardrail;
+        const action = guardrail?.action;
+
+        // -------------------------
+        // Guardrail enforcement (行为层门控)
+        // -------------------------
+        if (action === "BLOCK") {
           return {
-            content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: [
+                  "⛔ Decision Guardrail: BLOCK",
+                  `Reason: ${guardrail.reason ?? "Risk threshold exceeded."}`,
+                  "",
+                  "Action blocked. Reduce risk signals and retry.",
+                  "",
+                  "Full decision payload:",
+                  JSON.stringify(out, null, 2),
+                ].join("\n"),
+              },
+            ],
           };
         }
 
-        case "assess": {
-          // 如需排查再打开（建议保持 stderr 打印，避免污染 MCP stdout 协议）
-          // console.error("[debug] tools/call assess args =", JSON.stringify(args, null, 2));
-          // console.error("[debug] tools/call assess args.signals =", JSON.stringify((args as any)?.signals ?? null, null, 2));
+        // REQUIRE_CONFIRM：必须返回 receipt，并提示用户按 receipt 签收
+        if (action === "REQUIRE_CONFIRM") {
+          const receipt = guardrail?.receipt;
+          const receiptId = receipt?.receipt_id;
+          const planHash = receipt?.plan_hash;
 
-          const signals = (args as any)?.signals as TriggerSignals | undefined;
-          if (!signals) throw new Error("signals parameter is required");
+          // legacy confirm:true 的情况：明确提示升级
+          const legacyTrue = (confirmNorm as any)?.mode === "INVALID_LEGACY_TRUE";
 
-          const out = assess({ config, signals });
-          appendArtifact(STATE_FILE, "decision", out);
+          const rerunHint =
+            receiptId && planHash
+              ? `{ signals: ..., confirm: { mode: "EXECUTE", receipt_id: "${receiptId}", plan_hash: "${planHash}" } }`
+              : `{ signals: ... }  // (missing receipt: ensure assess.ts attaches guardrail.receipt)`;
+
           return {
-            content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: [
+                  "⚠️ Decision Guardrail: REQUIRE_CONFIRM",
+                  `Reason: ${guardrail.reason ?? "High risk detected."}`,
+                  "",
+                  "This action is blocked until you explicitly confirm the latest receipt.",
+                  legacyTrue
+                    ? "Note: legacy confirm:true is no longer accepted. Please confirm with receipt_id + plan_hash."
+                    : "",
+                  `Re-run the tool with: ${rerunHint}`,
+                  "",
+                  "Full decision payload:",
+                  JSON.stringify(out, null, 2),
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+              },
+            ],
           };
         }
 
-        case "plan": {
-          const out = plan({ decision: (args as any)?.decision });
+        // -------------------------
+        // ✅ Allow (explicit)
+        // -------------------------
+        if (action === "ALLOW") {
+          const confirmedPlan = guardrail?.confirmation?.confirmed_plan_hash;
+          const header = confirmedPlan
+            ? `[confirmed] Guardrail receipt EXECUTE accepted (plan_hash=${confirmedPlan})\n\n`
+            : "[confirmed] Guardrail ALLOW\n\n";
+
           return {
-            content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
+            content: [
+              {
+                type: "text",
+                text: header + JSON.stringify(out, null, 2),
+              },
+            ],
           };
         }
 
-        case "followup": {
-          const out = followup({ decision: (args as any)?.decision });
-          return {
-            content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
-          };
-        }
-
-        default:
-          throw new Error(`Unknown tool: ${toolName}`);
+        // -------------------------
+        // ✅ Default pass-through (no blocking guardrail)
+        // -------------------------
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(out, null, 2),
+            },
+          ],
+        };
       }
+
+      case "plan": {
+        const out = plan({ decision: (safeArgs as any)?.decision });
+        return {
+          content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
+        };
+      }
+
+      case "followup": {
+        const out = followup({ decision: (safeArgs as any)?.decision });
+        return {
+          content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
+        };
+      }
+
+      default:
+        throw new Error(`Unknown tool: ${toolName}`);
     }
-  );
+  });
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  // ⚠️ stdio 模式下：不要向 stdout 输出任何日志，否则会污染 MCP 协议
-  // 如需排查，仅允许 stderr：
+  // stdio 模式下：不要向 stdout 输出任何日志，否则会污染 MCP 协议
+  // 如需排查，仅允许 stderr
   // console.error(`MCP server started: ${config.app.name}@${config.app.version}`);
 }
 
 // 关键：main() 必须在函数体外调用
 main().catch((err) => {
-  // 同样：只允许 stderr
+  // 仅允许 stderr
   // console.error("Fatal error:", err);
   process.exit(1);
 });

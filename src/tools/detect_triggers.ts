@@ -1,3 +1,4 @@
+import { defaultConfig } from "../config/defaults.js";
 import type { TriggerSignals } from "../rules/refactor_time_black_hole.js";
 import { evaluate } from "../infra/index.js";
 import type { DecisionSignal } from "../infra/types/signal.js";
@@ -43,7 +44,7 @@ export function detectTriggers(input: DetectTriggersInput): DetectTriggersOutput
   const infraSignals = toInfraSignals(signals, notes);
 
   // evaluate policy (always safe; minimal kernel)
-  const policy = evaluate(infraSignals);
+  const policy = evaluate(infraSignals, defaultConfig);
 
     return { signals, notes, policy, infraSignals };
 }
