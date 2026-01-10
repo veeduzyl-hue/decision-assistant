@@ -1,149 +1,89 @@
 # Decision Assistant
 
-**Decision Assistant** is a deterministic decision infrastructure that helps
-developers detect high-risk engineering behavior and enforce explicit execution
-boundaries.
+**Decision Assistant is a cold decision guard for developers.**
 
-It is designed to answer a simple but critical question:
-
-> *Should this change proceed as-is, require explicit confirmation, or be blocked?*
+It does not help you code faster.  
+It helps you **stop at the exact moment you are about to make a costly mistake**.
 
 ---
 
-## Why Decision Assistant Exists
+## What It Does
 
-Many development risks are not caused by lack of intelligence, but by
-**implicit execution**:
+Decision Assistant intervenes **at decision time**, not code time.
 
-- Large refactors proceed without clear exit criteria
-- Risk accumulates gradually and becomes invisible
-- “Just one more change” crosses a cost boundary silently
+It detects high-risk engineering behavior and forces an explicit choice when:
 
-Decision Assistant makes these boundaries **explicit, deterministic, and reviewable**.
+- Change amplification spikes  
+- AI-generated code momentum gets out of control  
+- Your actions drift away from your stated goal  
+- A refactor is quietly turning into a time sink  
 
----
+When triggered, it **interrupts execution** and requires explicit confirmation to proceed.
 
-## Core Concepts (v0.2)
-
-### 1. Deterministic Decision Infra
-
-Decision Assistant evaluates low-level engineering signals (e.g. change
-amplification) and maps them into **policy actions**:
-
-- `ALLOW`
-- `WARN`
-- `BLOCK`
-
-This layer is fully deterministic and does not rely on LLM reasoning.
+No silent continuation.
 
 ---
 
-### 2. Guardrail with Explicit Confirmation
+## What It Is Not
 
-Policy actions are upgraded into **guardrail decisions**:
+This tool is intentionally limited.
 
-| policy.action | guardrail.action |
-|---------------|------------------|
-| `ALLOW`       | `ALLOW`          |
-| `WARN`        | `REQUIRE_CONFIRM`|
-| `BLOCK`       | `BLOCK`          |
+It does **not**:
 
-When confirmation is required, execution is **paused by default**.
+- Optimize or refactor your code  
+- Explain risk scores or metrics  
+- Provide dashboards or analytics  
+- Act as a friendly coding assistant  
+- Let you tweak thresholds to feel better  
 
----
-
-### 3. Guardrail Receipt Protocol
-
-Instead of a boolean “confirm” flag, v0.2 introduces a **receipt-based protocol**.
-
-When a guardrail requires confirmation, the tool returns a receipt:
-
-```json
-{
-  "receipt_id": "gr_...",
-  "plan_hash": "plan_...",
-  "scope": "this_call_only"
-}
-```
-
-Execution is only permitted when the caller explicitly confirms **the same plan**:
-
-```json
-{
-  "confirm": {
-    "mode": "EXECUTE",
-    "receipt_id": "gr_...",
-    "plan_hash": "plan_..."
-  }
-}
-```
-
-This prevents accidental or stale confirmations.
+If you want advice, suggestions, or encouragement — this is not the tool.
 
 ---
 
-## Default Guardrail Thresholds
+## How It Works (Phase 1)
 
-v0.2 ships with **stable defaults** for change amplification:
+- Deterministic rules only  
+- No LLMs in the decision path  
+- Cold-first, single-hit execution  
+- Hard guardrail semantics:
+  - `ALLOW`
+  - `REQUIRE_CONFIRM`
+  - `BLOCK`
 
-| files_touched | Behavior |
-|---------------|----------|
-| `< 8`         | Allow execution |
-| `>= 8`        | Require explicit confirmation |
-| `>= 16`       | Block execution |
+If the system interrupts you, it is by design.
 
-These thresholds are treated as **defaults**, not user-tunable parameters in v0.2.
-
----
-
-## Usage
-
-### Build
-```bash
-npm run build
-```
-
-### Verify guardrail behavior
-```bash
-npm run verify:guardrail
-```
-
-### Test MCP assess flow
-```bash
-npx tsx scripts/mcp_call_assess.ts
-npx tsx scripts/mcp_call_assess.ts --auto
-```
+**Discipline is the product.**
 
 ---
 
-## Design Principles
+## Who This Is For
 
-- **Determinism over heuristics**
-- **Explicit confirmation over implicit execution**
-- **Protocols over ad-hoc prompts**
-- **Late but confident intervention**
+- Independent developers  
+- Builders using AI copilots  
+- People who repeatedly lose weeks to “just one more refactor”  
+- Anyone who wants a system that can say **“stop”** when they won’t  
 
-Decision Assistant is not a linter, optimizer, or code generator.
-It is an execution boundary.
-
----
-
-## Documentation
-
-- Guardrail Receipt Protocol: `docs/guardrail_protocol.md`
-- Decision Rules: `docs/decision_rules.md`
-- Configuration & defaults: `docs/config.md`
+If you are optimizing for comfort, this tool will feel annoying.
 
 ---
 
 ## Status
 
-- Current version: **v0.2.0**
-- Stability: Experimental but protocol-stable
-- Intended users: Independent developers and small teams
+- Phase 1: Cold Rules Guardrail ✅  
+- Phase 2: Latent risk analysis (internal, not exposed)  
+- Phase 3+: Not decided yet  
+
+This project is opinionated on purpose.
 
 ---
 
-## License
+## Philosophy
 
-MIT
+Most developer tools help you move faster.
+
+Decision Assistant helps you **not move when you shouldn’t**.
+
+That difference matters more than it sounds.
+
+> If you are afraid this tool might interrupt you too often,  
+> then you are probably the exact person it was built for.
