@@ -18,6 +18,26 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { createHash, randomUUID } from "crypto";
 
+function renderReasons(reasons: any): string[] {
+  if (!reasons) return [];
+
+  // New structure: { default, cold?, brutal? }
+  if (typeof reasons === "object" && !Array.isArray(reasons)) {
+    if (typeof reasons.default === "string") {
+      return [reasons.default];
+    }
+    return [];
+  }
+
+  // Old structure: string[]
+  if (Array.isArray(reasons)) {
+    return reasons.filter((r) => typeof r === "string");
+  }
+
+  return [String(reasons)];
+}
+
+
 /**
  * confirm 语义收敛：
  * - ACK：仅确认收到 REQUIRE_CONFIRM（不放行）
@@ -35,9 +55,14 @@ export type ConfirmInput =
       plan_hash: string;
     };
 
+/**
+ * NOTE:
+ * - 你的脚本传入的 signals 已经包含 files_touched_per_change_median / lines_added / ...
+ * - 为了兼容，我们允许 signals 在 TriggerSignals 基础上携带额外字段
+ */
 export type AssessInput = {
-  config: AppConfig;
-  signals: TriggerSignals;
+  config?: AppConfig;
+  signals: TriggerSignals & Record<string, unknown>;
   answers?: Answers;
   confirm?: ConfirmInput;
 };
@@ -107,13 +132,12 @@ function buildPlanHash(args: {
 /* Signal mappings                                                     */
 /* ------------------------------------------------------------------ */
 
-function toSignalsV01(ts: TriggerSignals): Signals {
+function toSignalsV01(ts: TriggerSignals & Record<string, unknown>): Signals {
   const evo: any = {};
   const str: any = {};
   const cpx: any = {};
 
   // A) Time Sink Risk
-
   evo.refactor_days = Number((ts as any).refactor_days ?? 0);
   evo.no_user_feature_delivery_days = Number((ts as any).ship_gap_days ?? 0);
 
@@ -155,16 +179,50 @@ function toSignalsV01(ts: TriggerSignals): Signals {
   return { evolution: evo, structure: str, complexity: cpx } as Signals;
 }
 
-function toInfraSignals(ts: TriggerSignals): DecisionSignal[] {
+/**
+ * Phase 1+ infra signals:
+ * Convert TriggerSignals(+extra) -> DecisionSignal[]
+ *
+ * Required for cold rules:
+ * - files_touched_per_change_median (number)
+ * - lines_added (number)
+ * - active_duration_ms (number)
+ * - input_source (string)
+ * - active_goal (string)
+ * - touched_paths (string[])
+ */
+function toInfraSignals(ts: TriggerSignals & Record<string, unknown>): DecisionSignal[] {
   const infraSignals: DecisionSignal[] = [];
-  const ft = (ts as any).files_touched;
-  if (typeof ft === "number" && Number.isFinite(ft)) {
-    infraSignals.push({
-      kind: "files_touched",
-      value: ft,
-      context: { source: "TriggerSignals" },
-    });
-  }
+
+  const pushNumber = (kind: string, v: unknown) => {
+    if (typeof v === "number" && Number.isFinite(v)) {
+      infraSignals.push({ kind: kind as any, value: v as any, context: { source: "TriggerSignals" } });
+    }
+  };
+  const pushString = (kind: string, v: unknown) => {
+    if (typeof v === "string") {
+      infraSignals.push({ kind: kind as any, value: v as any, context: { source: "TriggerSignals" } });
+    }
+  };
+  const pushStringArray = (kind: string, v: unknown) => {
+    if (Array.isArray(v) && v.every((x) => typeof x === "string")) {
+      infraSignals.push({ kind: kind as any, value: v as any, context: { source: "TriggerSignals" } });
+    }
+  };
+
+  // Existing: files_touched
+  pushNumber("files_touched", (ts as any).files_touched);
+
+  // Phase 1 cold rules: R2/R3/R4
+  pushNumber("files_touched_per_change_median", (ts as any).files_touched_per_change_median);
+  pushNumber("lines_added", (ts as any).lines_added);
+  pushNumber("active_duration_ms", (ts as any).active_duration_ms);
+
+  pushString("input_source", (ts as any).input_source);
+  pushString("active_goal", (ts as any).active_goal);
+
+  pushStringArray("touched_paths", (ts as any).touched_paths);
+
   return infraSignals;
 }
 
@@ -173,10 +231,13 @@ function toInfraSignals(ts: TriggerSignals): DecisionSignal[] {
 /* ------------------------------------------------------------------ */
 
 export function assess(input: AssessInput): AssessOutput {
-  // 1) v0.1 rule
-  const rule_hit = evaluateRefactorTimeBlackhole(input.config, input.signals);
+  // Use provided config if present, otherwise default
+  const cfg: AppConfig = input.config ?? defaultConfig;
 
-  // 2) scoring
+  // 1) v0.1 rule (latent, Phase 2)
+  const rule_hit = evaluateRefactorTimeBlackhole(cfg, input.signals);
+
+  // 2) scoring (Phase 2 internal capability)
   const signalsForScoring = toSignalsV01(input.signals);
   const risk = computeRiskScore(signalsForScoring, input.answers);
   const decisionRaw = decide(signalsForScoring, input.answers);
@@ -184,19 +245,20 @@ export function assess(input: AssessInput): AssessOutput {
   // 3) rule override (type-stable)
   const decision: ReturnType<typeof decide> =
     rule_hit.hit && decisionRaw.decision === "SHIP"
-      ? {
-          ...decisionRaw,
-          decision: ("SCOPED_REFACTOR" as (typeof decisionRaw)["decision"]),
-          reasons: [
-            ...(decisionRaw.reasons ?? []),
-            "[rule_override] Refactor Time Blackhole rule hit; override SHIP -> SCOPED_REFACTOR.",
-          ],
-        }
+    ? {
+      ...decisionRaw,
+      decision: ("SCOPED_REFACTOR" as (typeof decisionRaw)["decision"]),
+      reasons: [
+        ...renderReasons(decisionRaw.reasons),
+        "[rule_override] Refactor Time Blackhole rule hit; override SHIP -> SCOPED_REFACTOR.",
+      ],
+    }
+  
       : decisionRaw;
 
-  // 4) v0.2 infra + guardrail
+  // 4) v0.2 infra + guardrail (Phase 1 surface)
   const infraSignals = toInfraSignals(input.signals);
-  const policy = evaluate(infraSignals, defaultConfig);
+  const policy = evaluate(infraSignals, cfg); // IMPORTANT: use cfg, not defaultConfig
   const guardrailBase = evaluateGuardrail({ infraSignals, policy });
 
   /**
@@ -275,8 +337,7 @@ export function assess(input: AssessInput): AssessOutput {
           guardrail: {
             action: "REQUIRE_CONFIRM",
             reason:
-              guardrailBase.reason +
-              " (confirmation rejected: receipt is stale or plan changed)",
+              guardrailBase.reason + " (confirmation rejected: receipt is stale or plan changed)",
             receipt,
             executed: false,
             confirmation: {
