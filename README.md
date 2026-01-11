@@ -1,3 +1,5 @@
+If it feels annoying, it’s probably working.
+
 # Decision Assistant
 
 **Decision Assistant is a cold decision guard for developers.**
