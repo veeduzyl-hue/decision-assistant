@@ -2,3 +2,5 @@ node_modules/
 dist/
 .decision_assistant/
 .env
+
+product_boundary.md
