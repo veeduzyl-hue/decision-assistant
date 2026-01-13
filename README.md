@@ -1,5 +1,3 @@
-If it feels annoying, it’s probably working.
-
 # Decision Assistant
 
 **Decision Assistant is a cold decision guard for developers.**
@@ -22,8 +20,7 @@ It detects high-risk engineering behavior and forces an explicit choice when:
 
 When triggered, it **interrupts execution** and requires explicit confirmation to proceed.
 
-No silent continuation.  
-No “just this once.”
+No silent continuation.
 
 ---
 
@@ -59,45 +56,49 @@ If the system interrupts you, it is by design.
 
 ---
 
-## Observability (Local-only)
+## Try It Locally (5 minutes)
 
-Decision Assistant includes **minimal, local-only observability**.
+This repository includes a minimal round-trip demo that shows the full guardrail lifecycle:
+**REQUIRE_CONFIRM → explicit EXECUTE → ALLOW**, plus local-only observability.
 
-Every guardrail interruption is recorded so you can later answer questions like:
-
-- How often do guardrails trigger?
-- Which rules fire the most?
-- How often do you actually proceed after being stopped?
-
-### Data storage
-
-- **No external upload**
-- **No user identity**
-- **Append-only local log**
-
-**File path**
-- Windows: `%USERPROFILE%\.decision-assistant\telemetry.jsonl`
-- macOS / Linux: `~/.decision-assistant/telemetry.jsonl`
-
-### Disable telemetry
+### 1. Install dependencies
 
 ```bash
-DA_TELEMETRY=0
+npm install
+npm run build
 ```
 
-### Generate a report
+### 2. Run the guardrail round-trip demo
+
+```bash
+npx tsx examples/demo_guardrail_roundtrip.ts
+```
+
+You will see:
+
+- A triggered `REQUIRE_CONFIRM`
+- A receipt (`receipt_id`, `plan_hash`)
+- A second execution with `mode=EXECUTE`
+- A final `ALLOW`
+
+### 3. Inspect local-only telemetry
 
 ```bash
 npx tsx scripts/telemetry_report.ts --days 7
 ```
 
-The report shows:
-- Number of interruptions
-- Pending vs confirmed executions
-- Execution rate (`confirmed / pending`)
-- Most frequent rules triggered
+Telemetry is:
 
-Telemetry exists to **measure discipline**, not to optimize comfort.
+- Local-only (JSONL file)
+- Append-only
+- Anonymous
+- Opt-out via `DA_TELEMETRY=0`
+
+Stored at:
+
+```
+~/.decision-assistant/telemetry.jsonl
+```
 
 ---
 
@@ -110,17 +111,15 @@ Telemetry exists to **measure discipline**, not to optimize comfort.
 
 If you are optimizing for comfort, this tool will feel annoying.
 
-That is intentional.
-
 ---
 
 ## Status
 
 - Phase 1: Cold Rules Guardrail ✅  
 - Phase 2: Latent risk analysis (internal, not exposed)  
-- Phase 3+: Undecided  
+- Phase 3+: Not decided yet  
 
-The roadmap is deliberately constrained.
+This project is opinionated on purpose.
 
 ---
 
