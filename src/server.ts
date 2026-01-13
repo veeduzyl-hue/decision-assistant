@@ -14,6 +14,7 @@ import { z } from "zod";
 import type { TriggerSignals } from "./rules/refactor_time_black_hole.js";
 
 import { LIMITS } from "./config/index.js";
+import { Telemetry } from "./telemetry.js";
 
 const STATE_FILE = ".decision_assistant/state.json";
 
@@ -103,7 +104,9 @@ type ConfirmArg =
       plan_hash?: unknown;
     };
 
-function normalizeConfirm(confirmRaw: ConfirmArg | undefined):
+function normalizeConfirm(
+  confirmRaw: ConfirmArg | undefined
+):
   | undefined
   | { mode: "ACK"; receipt_id?: string; plan_hash?: string }
   | { mode: "EXECUTE"; receipt_id: string; plan_hash: string }
@@ -153,6 +156,10 @@ async function main() {
       },
     }
   );
+
+  // ✅ Minimal Observability: local-only telemetry (append-only JSONL)
+  // Disable by env: DA_TELEMETRY=0
+  const telemetry = new Telemetry();
 
   // tools/list
   server.setRequestHandler(ToolsListRequestSchema as any, async () => {
@@ -211,6 +218,8 @@ async function main() {
                   receipt_id: { type: "string" },
                   plan_hash: { type: "string" },
                 },
+                // confirm 本身非必填，但一旦传入则需三件套齐全
+                required: ["mode", "receipt_id", "plan_hash"],
               },
             },
             required: ["signals"],
@@ -266,7 +275,9 @@ async function main() {
         if (!signals) throw new Error("signals parameter is required");
 
         // ✅ 新版 confirm（带 receipt 的签收）
-        const confirmNorm = normalizeConfirm((safeArgs as any)?.confirm as ConfirmArg | undefined);
+        const confirmNorm = normalizeConfirm(
+          (safeArgs as any)?.confirm as ConfirmArg | undefined
+        );
 
         // 传入 assess，让它生成 receipt / 校验 plan_hash / 放行（action=ALLOW）
         const out = assess({ config, signals, confirm: confirmNorm as any });
@@ -275,10 +286,37 @@ async function main() {
         const guardrail = (out as any)?.guardrail;
         const action = guardrail?.action;
 
+        // Prefer rule_id from payload for aggregation
+        const ruleId =
+          (out as any)?.rule_hit?.rule_id ??
+          (guardrail as any)?.rule_id ??
+          "unknown_rule";
+
+        // ✅ If user explicitly ACKs (receipt read but not executed), record aborted
+        if ((confirmNorm as any)?.mode === "ACK") {
+          const rid = (confirmNorm as any)?.receipt_id;
+          if (typeof rid === "string") {
+            telemetry.recordAction({
+              rule_id: ruleId,
+              decision: "REQUIRE_CONFIRM",
+              interruption_id: rid,
+              user_action: "aborted",
+              signals: signals ?? {},
+            });
+          }
+        }
+
         // -------------------------
         // Guardrail enforcement (行为层门控)
         // -------------------------
         if (action === "BLOCK") {
+          telemetry.recordInterruption({
+            rule_id: ruleId,
+            decision: "BLOCK",
+            signals: signals ?? {},
+            user_action: "pending",
+          });
+
           return {
             isError: true,
             content: [
@@ -304,6 +342,15 @@ async function main() {
           const receiptId = receipt?.receipt_id;
           const planHash = receipt?.plan_hash;
 
+          // ✅ record pending, correlated by receipt_id if available
+          telemetry.recordInterruption({
+            rule_id: ruleId,
+            decision: "REQUIRE_CONFIRM",
+            signals: signals ?? {},
+            user_action: "pending",
+            interruption_id: typeof receiptId === "string" ? receiptId : undefined,
+          });
+
           // legacy confirm:true 的情况：明确提示升级
           const legacyTrue = (confirmNorm as any)?.mode === "INVALID_LEGACY_TRUE";
 
@@ -327,6 +374,8 @@ async function main() {
                     : "",
                   `Re-run the tool with: ${rerunHint}`,
                   "",
+                  `Local-only log: ${telemetry.getFilePath()} (disable: DA_TELEMETRY=0)`,
+                  "",
                   "Full decision payload:",
                   JSON.stringify(out, null, 2),
                 ]
@@ -341,6 +390,20 @@ async function main() {
         // ✅ Allow (explicit)
         // -------------------------
         if (action === "ALLOW") {
+          // If this ALLOW is due to EXECUTE, record confirmed action
+          if ((confirmNorm as any)?.mode === "EXECUTE") {
+            const rid = (confirmNorm as any)?.receipt_id;
+            if (typeof rid === "string") {
+              telemetry.recordAction({
+                rule_id: ruleId,
+                decision: "REQUIRE_CONFIRM",
+                interruption_id: rid,
+                user_action: "confirmed",
+                signals: signals ?? {},
+              });
+            }
+          }
+
           const confirmedPlan = guardrail?.confirmation?.confirmed_plan_hash;
           const header = confirmedPlan
             ? `[confirmed] Guardrail receipt EXECUTE accepted (plan_hash=${confirmedPlan})\n\n`

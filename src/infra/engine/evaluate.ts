@@ -1,9 +1,10 @@
 import type { DecisionSignal } from "../types/signal.js";
 import type { PolicyDecision } from "../types/policy.js";
 import type { AppConfig } from "../../config/defaults.js";
-
+import type { TriggerSignals } from "../../rules/refactor_time_black_hole.js";
 import { evaluateColdRules } from "../../rules/cooldown.js";
-import { evaluateRefactorTimeBlackholeFromDecisionSignals } from "../../rules/refactor_time_black_hole.js";
+import { evaluateRefactorTimeBlackhole } 
+  from "../../rules/refactor_time_black_hole.js";
 
 function renderReasonText(reasons: any): string {
   if (!reasons) return "";
@@ -83,7 +84,35 @@ export function evaluate(signals: DecisionSignal[], config: AppConfig): PolicyDe
    * - Only in full mode
    * - You can decide whether to surface as WARN or just log.
    */
-  const latent = evaluateRefactorTimeBlackholeFromDecisionSignals(config, signals);
+  function toTriggerSignals(signals: any[]): TriggerSignals {
+    // DecisionSignal[] → { [key]: value } 形式
+    // 只提取 rule 需要的字段；缺失则为 undefined
+    const m = new Map<string, unknown>();
+    for (const s of signals ?? []) {
+      const key = (s as any)?.key ?? (s as any)?.name;
+      const value = (s as any)?.value;
+      if (typeof key === "string") m.set(key, value);
+    }
+  
+    const num = (k: string): number | undefined => {
+      const v = m.get(k);
+      return typeof v === "number" ? v : undefined;
+    };
+  
+    return {
+      ship_gap_days: num("ship_gap_days"),
+      refactor_commits_ratio: num("refactor_commits_ratio"),
+      todo_growth_ratio: num("todo_growth_ratio"),
+      churn_ratio: num("churn_ratio"),
+      refactor_days: num("refactor_days"),
+      files_touched: num("files_touched"),
+    } as TriggerSignals;
+  }
+  
+  const triggerSignals = toTriggerSignals(signals);
+  const latent = evaluateRefactorTimeBlackhole(config, triggerSignals);
+  
+
   if (latent.hit) {
     return {
       action: "WARN",
