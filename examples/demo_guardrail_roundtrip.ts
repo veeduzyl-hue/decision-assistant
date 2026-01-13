@@ -1,3 +1,5 @@
+// Demo: guardrail round-trip (REQUIRE_CONFIRM -> EXECUTE -> ALLOW)
+
 import { spawn } from "node:child_process";
 
 type JsonRpcReq = {
