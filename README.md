@@ -1,9 +1,17 @@
 # Decision Assistant
 
-**Decision Assistant is a cold decision guard for developers.**
+A deterministic decision guard for developers.
 
 It does not help you code faster.  
-It helps you **stop at the exact moment you are about to make a costly mistake**.
+It intervenes at **decision time**, when execution is about to cross a risk boundary.
+
+- Deterministic rules only (no LLMs in the decision path)
+- Hard guardrails: `ALLOW` / `REQUIRE_CONFIRM` / `BLOCK`
+- Explicit confirmation required to proceed
+- Local-only observability, no analytics backend
+
+Built for developers who want the system to stop them  
+when they won’t stop themselves.
 
 ---
 
