@@ -22,7 +22,8 @@ It detects high-risk engineering behavior and forces an explicit choice when:
 
 When triggered, it **interrupts execution** and requires explicit confirmation to proceed.
 
-No silent continuation.
+No silent continuation.  
+No “just this once.”
 
 ---
 
@@ -58,6 +59,48 @@ If the system interrupts you, it is by design.
 
 ---
 
+## Observability (Local-only)
+
+Decision Assistant includes **minimal, local-only observability**.
+
+Every guardrail interruption is recorded so you can later answer questions like:
+
+- How often do guardrails trigger?
+- Which rules fire the most?
+- How often do you actually proceed after being stopped?
+
+### Data storage
+
+- **No external upload**
+- **No user identity**
+- **Append-only local log**
+
+**File path**
+- Windows: `%USERPROFILE%\.decision-assistant\telemetry.jsonl`
+- macOS / Linux: `~/.decision-assistant/telemetry.jsonl`
+
+### Disable telemetry
+
+```bash
+DA_TELEMETRY=0
+```
+
+### Generate a report
+
+```bash
+npx tsx scripts/telemetry_report.ts --days 7
+```
+
+The report shows:
+- Number of interruptions
+- Pending vs confirmed executions
+- Execution rate (`confirmed / pending`)
+- Most frequent rules triggered
+
+Telemetry exists to **measure discipline**, not to optimize comfort.
+
+---
+
 ## Who This Is For
 
 - Independent developers  
@@ -67,15 +110,17 @@ If the system interrupts you, it is by design.
 
 If you are optimizing for comfort, this tool will feel annoying.
 
+That is intentional.
+
 ---
 
 ## Status
 
 - Phase 1: Cold Rules Guardrail ✅  
 - Phase 2: Latent risk analysis (internal, not exposed)  
-- Phase 3+: Not decided yet  
+- Phase 3+: Undecided  
 
-This project is opinionated on purpose.
+The roadmap is deliberately constrained.
 
 ---
 
