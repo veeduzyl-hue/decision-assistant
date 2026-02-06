@@ -146,6 +146,20 @@ function hasFlag(name: string): boolean {
   return process.argv.includes(name);
 }
 
+function loadSignals(): Record<string, unknown> {
+  const idx = process.argv.indexOf("--signals");
+  const raw = idx >= 0 ? process.argv[idx + 1] : process.env.DA_DEMO_SIGNALS;
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
+    } catch {
+      // fall through to default
+    }
+  }
+  return { files_touched: 10 };
+}
+
 function printSection(title: string, body: string) {
   console.log(`\n=== ${title} ===`);
   console.log(body);
@@ -153,7 +167,7 @@ function printSection(title: string, body: string) {
 
 async function main() {
   const auto = hasFlag("--auto");
-  const signals = { files_touched: 10 };
+  const signals = loadSignals();
 
   // PASS 1
   const resp1 = await callAssess({ signals });
