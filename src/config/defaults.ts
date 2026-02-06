@@ -67,6 +67,8 @@ export type AppConfig = {
     version: string;
   };
 
+  mode?: "cold" | "full";
+
   rules: {
     refactor_time_blackhole: RefactorTimeBlackholeConfig;
     ai_momentum_override: AiMomentumOverrideConfig;
@@ -93,6 +95,7 @@ export const defaultConfig: AppConfig = {
     name: "decision-assistant",
     version: "0.2.0",
   },
+  mode: "full",
 
   rules: {
     refactor_time_blackhole: {

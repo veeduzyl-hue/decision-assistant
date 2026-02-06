@@ -72,12 +72,14 @@ export function evaluate(signals: DecisionSignal[], config: AppConfig): PolicyDe
     };
   }
 
+  let baseAction: PolicyDecision["action"] = "ALLOW";
+  let baseReason = "No high-cost signals detected.";
+  let baseSuggestedExits: string[] | undefined = undefined;
+
   if (filesTouched >= warn) {
-    return {
-      action: "WARN",
-      reason: `High change amplification detected (files_touched=${filesTouched}).`,
-      suggestedExits: ["TIMEBOX_10", "VALIDATE_FIRST"],
-    };
+    baseAction = "WARN";
+    baseReason = `High change amplification detected (files_touched=${filesTouched}).`;
+    baseSuggestedExits = ["TIMEBOX_10", "VALIDATE_FIRST"];
   }
 
   /**
@@ -118,25 +120,35 @@ export function evaluate(signals: DecisionSignal[], config: AppConfig): PolicyDe
   }
   
   const triggerSignals = toTriggerSignals(signals);
+  const latentReasons: string[] = [];
   const r3 = evaluateAiMomentumOverride(config, triggerSignals);
   if (r3.hit) {
-    return {
-      action: "WARN",
-      reason: `[latent:${r3.rule_id}] ${r3.reasons.join("；")}`,
-      suggestedExits: ["TIMEBOX_10", "VALIDATE_FIRST"],
-    };
+    latentReasons.push(`[latent:${r3.rule_id}] ${r3.reasons.join("；")}`);
   }
 
   const latent = evaluateRefactorTimeBlackhole(config, triggerSignals);
   
 
   if (latent.hit) {
+    latentReasons.push(`[latent:${latent.rule_id}] ${latent.reasons.join("；")}`);
+  }
+
+  if (latentReasons.length > 0) {
+    const reasons = baseAction === "WARN" ? [baseReason, ...latentReasons] : latentReasons;
     return {
       action: "WARN",
-      reason: `[latent:${latent.rule_id}] ${latent.reasons.join("；")}`,
+      reason: reasons.join("；"),
       suggestedExits: ["TIMEBOX_10", "VALIDATE_FIRST"],
     };
   }
 
-  return { action: "ALLOW", reason: "No high-cost signals detected." };
+  if (baseAction === "WARN") {
+    return {
+      action: "WARN",
+      reason: baseReason,
+      suggestedExits: baseSuggestedExits ?? ["TIMEBOX_10", "VALIDATE_FIRST"],
+    };
+  }
+
+  return { action: "ALLOW", reason: baseReason };
 }
