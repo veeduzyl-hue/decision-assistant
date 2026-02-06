@@ -187,8 +187,12 @@ function toSignalsV01(ts: TriggerSignals & Record<string, unknown>): Signals {
  * - files_touched_per_change_median (number)
  * - lines_added (number)
  * - active_duration_ms (number)
+ * - diff_lines_total (number)
+ * - new_files (number)
+ * - touches_package_json (boolean)
+ * - touches_lockfile (boolean)
  * - input_source (string)
- * - active_goal (string)
+ * - active_goal (string; intent alias accepted)
  * - touched_paths (string[])
  */
 function toInfraSignals(ts: TriggerSignals & Record<string, unknown>): DecisionSignal[] {
@@ -209,6 +213,11 @@ function toInfraSignals(ts: TriggerSignals & Record<string, unknown>): DecisionS
       infraSignals.push({ kind: kind as any, value: v as any, context: { source: "TriggerSignals" } });
     }
   };
+  const pushBoolean = (kind: string, v: unknown) => {
+    if (typeof v === "boolean") {
+      infraSignals.push({ kind: kind as any, value: v as any, context: { source: "TriggerSignals" } });
+    }
+  };
 
   // Existing: files_touched
   pushNumber("files_touched", (ts as any).files_touched);
@@ -218,8 +227,14 @@ function toInfraSignals(ts: TriggerSignals & Record<string, unknown>): DecisionS
   pushNumber("lines_added", (ts as any).lines_added);
   pushNumber("active_duration_ms", (ts as any).active_duration_ms);
 
+  pushNumber("diff_lines_total", (ts as any).diff_lines_total);
+  pushNumber("new_files", (ts as any).new_files);
+
+  pushBoolean("touches_package_json", (ts as any).touches_package_json);
+  pushBoolean("touches_lockfile", (ts as any).touches_lockfile);
+
   pushString("input_source", (ts as any).input_source);
-  pushString("active_goal", (ts as any).active_goal);
+  pushString("active_goal", (ts as any).active_goal ?? (ts as any).intent);
 
   pushStringArray("touched_paths", (ts as any).touched_paths);
 
