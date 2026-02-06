@@ -3,6 +3,7 @@ import type { PolicyDecision } from "../types/policy.js";
 import type { AppConfig } from "../../config/defaults.js";
 import type { TriggerSignals } from "../../rules/refactor_time_black_hole.js";
 import { evaluateColdRules } from "../../rules/cooldown.js";
+import { evaluateAiMomentumOverride } from "../../rules/r3_ai_momentum_override.js";
 import { evaluateRefactorTimeBlackhole } 
   from "../../rules/refactor_time_black_hole.js";
 
@@ -89,7 +90,7 @@ export function evaluate(signals: DecisionSignal[], config: AppConfig): PolicyDe
     // 只提取 rule 需要的字段；缺失则为 undefined
     const m = new Map<string, unknown>();
     for (const s of signals ?? []) {
-      const key = (s as any)?.key ?? (s as any)?.name;
+      const key = (s as any)?.key ?? (s as any)?.name ?? (s as any)?.kind;
       const value = (s as any)?.value;
       if (typeof key === "string") m.set(key, value);
     }
@@ -97,6 +98,10 @@ export function evaluate(signals: DecisionSignal[], config: AppConfig): PolicyDe
     const num = (k: string): number | undefined => {
       const v = m.get(k);
       return typeof v === "number" ? v : undefined;
+    };
+    const bool = (k: string): boolean | undefined => {
+      const v = m.get(k);
+      return typeof v === "boolean" ? v : undefined;
     };
   
     return {
@@ -106,10 +111,22 @@ export function evaluate(signals: DecisionSignal[], config: AppConfig): PolicyDe
       churn_ratio: num("churn_ratio"),
       refactor_days: num("refactor_days"),
       files_touched: num("files_touched"),
+      diff_lines_total: num("diff_lines_total"),
+      touches_package_json: bool("touches_package_json"),
+      touches_lockfile: bool("touches_lockfile"),
     } as TriggerSignals;
   }
   
   const triggerSignals = toTriggerSignals(signals);
+  const r3 = evaluateAiMomentumOverride(config, triggerSignals);
+  if (r3.hit) {
+    return {
+      action: "WARN",
+      reason: `[latent:${r3.rule_id}] ${r3.reasons.join("；")}`,
+      suggestedExits: ["TIMEBOX_10", "VALIDATE_FIRST"],
+    };
+  }
+
   const latent = evaluateRefactorTimeBlackhole(config, triggerSignals);
   
 

@@ -6,6 +6,10 @@ export type TriggerSignals = {
   refactor_commits_ratio?: number;     // refactor 提交占比
   todo_growth_ratio?: number;          // TODO/FIXME 增长比
   churn_ratio?: number;                // 代码变更抖动占比
+  files_touched?: number;
+  diff_lines_total?: number;
+  touches_package_json?: boolean;
+  touches_lockfile?: boolean;
 };
 
 export type RuleHit = {

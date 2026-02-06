@@ -30,6 +30,14 @@ export type RefactorTimeBlackholeConfig = {
   };
 };
 
+export type AiMomentumOverrideConfig = {
+  enabled: boolean;
+  thresholds: {
+    files_touched_warn: number;
+    diff_lines_warn: number;
+  };
+};
+
 /**
  * ============================
  * Guardrail Defaults
@@ -61,6 +69,7 @@ export type AppConfig = {
 
   rules: {
     refactor_time_blackhole: RefactorTimeBlackholeConfig;
+    ai_momentum_override: AiMomentumOverrideConfig;
   };
 
   /**
@@ -104,6 +113,13 @@ export const defaultConfig: AppConfig = {
         title: "检测到可能的“重构时间黑洞”",
         summary:
           "你可能在持续重构但缺少可交付产出。建议先收敛目标、定义可交付切片，并为重构设置明确的退出条件。",
+      },
+    },
+    ai_momentum_override: {
+      enabled: true,
+      thresholds: {
+        files_touched_warn: 8,
+        diff_lines_warn: 400,
       },
     },
   },

@@ -19,3 +19,19 @@ These values are treated as **defaults**, not user-tunable parameters.
 
 Future versions may allow customization without changing the Guardrail
 Receipt Protocol.
+
+## Rule Defaults (v0.2)
+
+### ai_momentum_override
+
+```
+rules.ai_momentum_override = {
+  enabled: true,
+  thresholds: {
+    files_touched_warn: 8,
+    diff_lines_warn: 400
+  }
+}
+```
+
+These defaults are deterministic and used by the FULL-mode latent rule.

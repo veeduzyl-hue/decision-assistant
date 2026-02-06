@@ -80,6 +80,38 @@ over early interruption based on weak signals.
 
 ---
 
+### 3.2 R3 — AI Momentum Override (Latent, FULL mode)
+
+**Source:** `src/rules/r3_ai_momentum_override.ts`
+
+#### Trigger Signals
+
+- `files_touched` (number)
+- `diff_lines_total` (number, from `git diff --numstat`)
+- `touches_package_json` (boolean, from `git diff --name-only`)
+- `touches_lockfile` (boolean, from `git diff --name-only`)
+
+#### Risk Hypothesis
+
+Large, fast-moving change sets that span many files — especially with dependency
+file touches — are more likely to exceed safe review or execution capacity.
+This is a momentum override: warn early when both breadth and intensity are high.
+
+#### Threshold Rationale
+
+- `files_touched_warn` defaults to **8**
+- `diff_lines_warn` defaults to **400**
+
+The rule only hits when **file breadth is high** and **either diff intensity is high
+or dependency files are touched**. This keeps intervention conservative.
+
+#### Expected Intervention
+
+- Surface a **WARN** action (guardrail → REQUIRE_CONFIRM)
+- Encourage short timeboxes and validation-first exits
+
+---
+
 ## 4. v0.2 — Decision Infra & Guardrail (Deterministic)
 
 Starting from **v0.2**, Decision Assistant introduces a deterministic
