@@ -1,4 +1,3 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import { r3_ai_momentum_override } from "../r3_ai_momentum_override.js";
 
@@ -9,7 +8,16 @@ const expectedBoundary = {
   forbid_protected_paths: false,
 } as const;
 
-test("weak intent + high files => hit", () => {
+function runCase(name: string, fn: () => void): void {
+  try {
+    fn();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`${name} failed: ${msg}`);
+  }
+}
+
+runCase("weak intent + high files => hit", () => {
   const result = r3_ai_momentum_override.evaluate({
     intent: "refactor",
     signals: {
@@ -29,7 +37,7 @@ test("weak intent + high files => hit", () => {
   assert(result.reasons.some((r) => r.includes("amplification_high")));
 });
 
-test("strong intent + high files => no hit", () => {
+runCase("strong intent + high files => no hit", () => {
   const result = r3_ai_momentum_override.evaluate({
     intent: "Update src/server.ts to validate receipt confirmation flow",
     signals: {
@@ -46,7 +54,7 @@ test("strong intent + high files => no hit", () => {
   assert.equal(result.verdict, "ALLOW");
 });
 
-test("weak intent + dependency change => hit", () => {
+runCase("weak intent + dependency change => hit", () => {
   const result = r3_ai_momentum_override.evaluate({
     intent: "cleanup",
     signals: {
@@ -65,7 +73,7 @@ test("weak intent + dependency change => hit", () => {
   assert(result.reasons.some((r) => r.includes("boundary_cross")));
 });
 
-test("weak intent + low change => no hit", () => {
+runCase("weak intent + low change => no hit", () => {
   const result = r3_ai_momentum_override.evaluate({
     intent: "quick fix",
     signals: {
@@ -81,3 +89,5 @@ test("weak intent + low change => no hit", () => {
   assert.equal(result.hit, false);
   assert.equal(result.verdict, "ALLOW");
 });
+
+console.log("[test:r3_ai_momentum_override] OK");
