@@ -1,5 +1,6 @@
 import type { DecisionSignal } from "../infra/types/signal.js";
 import type { AppConfig } from "../config/defaults.js";
+import { r3_ai_momentum_override } from "./r3_ai_momentum_override.js";
 
 export type ReasonsMap = {
   default: string;
@@ -29,6 +30,13 @@ function str(signals: DecisionSignal[], kind: string, fallback = ""): string {
 function strArr(signals: DecisionSignal[], kind: string): string[] {
   const v = signals.find((s) => s.kind === kind)?.value;
   return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+}
+function bool(signals: DecisionSignal[], kind: string, fallback = false): boolean {
+  const v = signals.find((s) => s.kind === kind)?.value;
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v > 0;
+  if (typeof v === "string") return v.toLowerCase() === "true";
+  return fallback;
 }
 
 /**
@@ -76,7 +84,41 @@ export function evaluateColdRules(signals: DecisionSignal[], config: AppConfig):
     };
   }
 
-  // R3: AI momentum override (minimal viable)
+  const touchedPaths = strArr(signals, "touched_paths");
+
+  // R3: AI momentum override (weak intent + amplification/boundary)
+  const intent = str(signals, "active_goal") || str(signals, "defined_goal");
+  const diffLinesTotal = num(signals, "diff_lines_total", 0);
+  const newFiles = num(signals, "new_files", 0);
+
+  const aiMomentum = r3_ai_momentum_override.evaluate({
+    intent,
+    signals: {
+      files_touched: filesTouched,
+      diff_lines_total: diffLinesTotal,
+      new_files: newFiles,
+      touches_package_json: bool(signals, "touches_package_json", false),
+      touches_lockfile: bool(signals, "touches_lockfile", false),
+      touched_paths: touchedPaths,
+    },
+  });
+
+  if (aiMomentum.hit) {
+    const boundary = aiMomentum.boundary;
+    const boundaryText = `Boundary: timebox=${boundary.timebox_minutes}m; max_files=${boundary.max_files}; forbid_new_deps=${boundary.forbid_new_deps}; forbid_protected_paths=${boundary.forbid_protected_paths}.`;
+    const reasonsText = aiMomentum.reasons.length
+      ? aiMomentum.reasons.join("; ")
+      : "weak_intent + amplification_or_boundary";
+    return {
+      hit: true,
+      rule_id: aiMomentum.rule_id,
+      reasons: {
+        default: `AI momentum override: ${reasonsText}. ${boundaryText}`,
+      },
+    };
+  }
+
+  // proxy: large injection in short time
   // signals:
   // - input_source: "ai_generated" | "manual"
   // - lines_added: number
@@ -84,18 +126,6 @@ export function evaluateColdRules(signals: DecisionSignal[], config: AppConfig):
   const source = str(signals, "input_source", "manual");
   const linesAdded = num(signals, "lines_added", 0);
   const activeMs = num(signals, "active_duration_ms", 0);
-
-  if (source === "ai_generated" && linesAdded >= 120) {
-    return {
-      hit: true,
-      rule_id: "r3_ai_momentum_override",
-      reasons: {
-        default: `AI momentum detected: accepted ${linesAdded} AI-generated lines in one change (>= 120).`,
-      },
-    };
-  }
-
-  // proxy: large injection in short time
   if (linesAdded >= 200 && activeMs > 0 && activeMs <= 5 * 60 * 1000) {
     return {
       hit: true,
@@ -112,7 +142,6 @@ export function evaluateColdRules(signals: DecisionSignal[], config: AppConfig):
   // - touched_paths: string[]
   const goalRaw = str(signals, "active_goal") || str(signals, "defined_goal");
   const goal = goalRaw.toLowerCase();
-  const touchedPaths = strArr(signals, "touched_paths");
 
   if (goal && touchedPaths.length) {
     const touchesSrc = touchedPaths.some((p) => p.startsWith("src/"));
