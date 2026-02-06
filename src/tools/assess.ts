@@ -14,8 +14,9 @@ import type { DecisionSignal, PolicyDecision } from "../infra/types/index.js";
 import type { GuardrailDecision, GuardrailReceipt } from "../guardrail/types.js";
 
 // 关键：不用 node: 前缀，避免你环境里再次触发兼容性红线
+import { spawnSync } from "child_process";
 import { existsSync } from "fs";
-import { join } from "path";
+import { basename, join } from "path";
 import { createHash, randomUUID } from "crypto";
 
 function renderReasons(reasons: any): string[] {
@@ -132,6 +133,63 @@ function buildPlanHash(args: {
 /* Signal mappings                                                     */
 /* ------------------------------------------------------------------ */
 
+type GitDiffSignals = {
+  diff_lines_total: number;
+  touches_package_json: boolean;
+  touches_lockfile: boolean;
+};
+
+function safeGitDiffSignals(): GitDiffSignals {
+  const fallback: GitDiffSignals = {
+    diff_lines_total: 0,
+    touches_package_json: false,
+    touches_lockfile: false,
+  };
+
+  let diffLinesTotal = fallback.diff_lines_total;
+  try {
+    const numstat = spawnSync("git", ["diff", "--numstat"], { encoding: "utf8" });
+    if (numstat.status === 0 && typeof numstat.stdout === "string") {
+      const lines = numstat.stdout.trim().split(/\r?\n/).filter(Boolean);
+      for (const line of lines) {
+        const parts = line.split("\t");
+        if (parts.length < 2) continue;
+        const added = Number(parts[0]);
+        const deleted = Number(parts[1]);
+        if (Number.isFinite(added)) diffLinesTotal += added;
+        if (Number.isFinite(deleted)) diffLinesTotal += deleted;
+      }
+    }
+  } catch {
+    diffLinesTotal = 0;
+  }
+
+  let touchesPackageJson = fallback.touches_package_json;
+  let touchesLockfile = fallback.touches_lockfile;
+  try {
+    const nameOnly = spawnSync("git", ["diff", "--name-only"], { encoding: "utf8" });
+    if (nameOnly.status === 0 && typeof nameOnly.stdout === "string") {
+      const files = nameOnly.stdout.trim().split(/\r?\n/).filter(Boolean);
+      const lockfiles = new Set(["package-lock.json", "pnpm-lock.yaml", "yarn.lock"]);
+      for (const f of files) {
+        const base = basename(f);
+        if (base === "package.json") touchesPackageJson = true;
+        if (lockfiles.has(base)) touchesLockfile = true;
+        if (touchesPackageJson && touchesLockfile) break;
+      }
+    }
+  } catch {
+    touchesPackageJson = false;
+    touchesLockfile = false;
+  }
+
+  return {
+    diff_lines_total: diffLinesTotal,
+    touches_package_json: touchesPackageJson,
+    touches_lockfile: touchesLockfile,
+  };
+}
+
 function toSignalsV01(ts: TriggerSignals & Record<string, unknown>): Signals {
   const evo: any = {};
   const str: any = {};
@@ -209,6 +267,17 @@ function toInfraSignals(ts: TriggerSignals & Record<string, unknown>): DecisionS
       infraSignals.push({ kind: kind as any, value: v as any, context: { source: "TriggerSignals" } });
     }
   };
+  const pushBoolean = (kind: string, v: unknown) => {
+    if (typeof v === "boolean") {
+      infraSignals.push({ kind: kind as any, value: v as any, context: { source: "TriggerSignals" } });
+    }
+  };
+
+  const gitSignals = safeGitDiffSignals();
+  const numberOr = (v: unknown, fallback: number): number =>
+    typeof v === "number" && Number.isFinite(v) ? v : fallback;
+  const booleanOr = (v: unknown, fallback: boolean): boolean =>
+    typeof v === "boolean" ? v : fallback;
 
   // Existing: files_touched
   pushNumber("files_touched", (ts as any).files_touched);
@@ -222,6 +291,20 @@ function toInfraSignals(ts: TriggerSignals & Record<string, unknown>): DecisionS
   pushString("active_goal", (ts as any).active_goal);
 
   pushStringArray("touched_paths", (ts as any).touched_paths);
+
+  // Latent R3 (FULL): git diff derived signals
+  pushNumber(
+    "diff_lines_total",
+    numberOr((ts as any).diff_lines_total, gitSignals.diff_lines_total)
+  );
+  pushBoolean(
+    "touches_package_json",
+    booleanOr((ts as any).touches_package_json, gitSignals.touches_package_json)
+  );
+  pushBoolean(
+    "touches_lockfile",
+    booleanOr((ts as any).touches_lockfile, gitSignals.touches_lockfile)
+  );
 
   return infraSignals;
 }

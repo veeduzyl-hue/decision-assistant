@@ -9,6 +9,7 @@
     "dev": "node --watch --enable-source-maps dist/server.js",
 
     "verify:guardrail": "npm run build && npx tsx scripts/verify_guardrail.ts",
+    "verify:ai_momentum_override": "npm run build && node scripts/verify_ai_momentum_override.js",
     "release:local": "npm run verify:guardrail"
   },
   "dependencies": {
