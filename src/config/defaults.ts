@@ -67,6 +67,15 @@ export type AppConfig = {
     version: string;
   };
 
+  /**
+   * Product mode:
+   * - cold: Phase 1 surface (cold-first, single-hit, low-noise)
+   * - full: v0.2 engine mode (can include latent rules / richer logic)
+   *
+   * NOTE: keep deterministic. Default is "full" so latent rules are reachable in demo.
+   */
+  mode?: "cold" | "full";
+
   rules: {
     refactor_time_blackhole: RefactorTimeBlackholeConfig;
     ai_momentum_override: AiMomentumOverrideConfig;
@@ -93,6 +102,9 @@ export const defaultConfig: AppConfig = {
     name: "decision-assistant",
     version: "0.2.0",
   },
+
+  // IMPORTANT: default to full so latent rules can run unless explicitly set to cold
+  mode: "full",
 
   rules: {
     refactor_time_blackhole: {
@@ -138,3 +150,6 @@ export const defaultConfig: AppConfig = {
     artifacts_dir: "src/artifacts",
   },
 };
+
+// Provide default export for convenience (node -e import(...).then(m=>m.default))
+export default defaultConfig;

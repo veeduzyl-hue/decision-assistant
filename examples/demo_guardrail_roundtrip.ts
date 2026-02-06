@@ -1,4 +1,5 @@
 // Demo: guardrail round-trip (REQUIRE_CONFIRM -> EXECUTE -> ALLOW)
+console.log("[argv]", process.argv.join(" "));
 
 import { spawn } from "node:child_process";
 
@@ -146,6 +147,13 @@ function hasFlag(name: string): boolean {
   return process.argv.includes(name);
 }
 
+function mutateTail(value: string): string {
+  if (!value) return "x";
+  const last = value[value.length - 1];
+  const replacement = last === "x" ? "y" : "x";
+  return value.slice(0, -1) + replacement;
+}
+
 function printSection(title: string, body: string) {
   console.log(`\n=== ${title} ===`);
   console.log(body);
@@ -153,7 +161,14 @@ function printSection(title: string, body: string) {
 
 async function main() {
   const auto = hasFlag("--auto");
-  const signals = { files_touched: 10 };
+  const neg = hasFlag("--neg");
+
+  const signals = {
+    files_touched: 10,
+    diff_lines_total: 450,
+    touches_package_json: true,
+    touches_lockfile: false,
+  };
 
   // PASS 1
   const resp1 = await callAssess({ signals });
@@ -172,7 +187,7 @@ async function main() {
   const action1 = payload1?.guardrail?.action;
 
   if (action1 !== "REQUIRE_CONFIRM") {
-    console.log("\n[info] Guardrail did not require confirmation; no pass 2 needed.");
+    console.log("\n[info] Guardrail did not require confirmation; no further passes needed.");
     return;
   }
 
@@ -186,7 +201,8 @@ async function main() {
   console.log(`- receipt_id: ${receipt.receipt_id}`);
   console.log(`- plan_hash : ${receipt.plan_hash}`);
 
-  if (!auto) {
+  // If neither auto nor neg: print rerun hint and stop (keep short)
+  if (!auto && !neg) {
     console.log("\n[next] To confirm explicitly, re-run with:");
     console.log(
       JSON.stringify(
@@ -199,36 +215,102 @@ async function main() {
       )
     );
     console.log('\nTip: add "--auto" to let this script perform PASS 2 automatically.');
+    console.log('Tip: add "--neg" to run PASS 3/4 negative receipt tests.');
     return;
   }
 
-  // PASS 2 (auto)
-  const resp2 = await callAssess({
-    signals,
-    confirm: {
-      mode: "EXECUTE",
-      receipt_id: receipt.receipt_id,
-      plan_hash: receipt.plan_hash,
-    },
-  });
+  // PASS 2 (optional)
+  if (auto) {
+    const resp2 = await callAssess({
+      signals,
+      confirm: {
+        mode: "EXECUTE",
+        receipt_id: receipt.receipt_id,
+        plan_hash: receipt.plan_hash,
+      },
+    });
 
-  const text2 = extractText(resp2);
-  printSection("PASS 2 (confirm EXECUTE) [--auto]", text2);
+    const text2 = extractText(resp2);
+    printSection("PASS 2 (confirm EXECUTE) [--auto]", text2);
 
-  const payload2 = extractPayloadJson(resp2);
-  if (!payload2) {
-    console.error("\n[error] PASS 2: cannot parse payload JSON from response text.");
-    process.exit(1);
+    const payload2 = extractPayloadJson(resp2);
+    if (!payload2) {
+      console.error("\n[error] PASS 2: cannot parse payload JSON from response text.");
+      process.exit(1);
+    }
+
+    console.log("\n[summary]");
+    console.log(summarizeGuardrail(payload2));
+
+    const action2 = payload2?.guardrail?.action;
+    if (action2 === "ALLOW") {
+      console.log("\n[ok] Guardrail receipt EXECUTE accepted. Action allowed.");
+    } else {
+      console.log(`\n[warn] Expected guardrail.action=ALLOW but got: ${String(action2)}`);
+    }
   }
 
-  console.log("\n[summary]");
-  console.log(summarizeGuardrail(payload2));
+  // PASS 3/4 (optional, independent from auto)
+  if (neg) {
+    // PASS 3: correct receipt_id, WRONG plan_hash
+    const badPlanHash = mutateTail(receipt.plan_hash);
+    const resp3 = await callAssess({
+      signals,
+      confirm: {
+        mode: "EXECUTE",
+        receipt_id: receipt.receipt_id,
+        plan_hash: badPlanHash,
+      },
+    });
 
-  const action2 = payload2?.guardrail?.action;
-  if (action2 === "ALLOW") {
-    console.log("\n[ok] Guardrail receipt EXECUTE accepted. Action allowed.");
-  } else {
-    console.log(`\n[warn] Expected guardrail.action=ALLOW but got: ${String(action2)}`);
+    const text3 = extractText(resp3);
+    printSection("PASS 3 (wrong plan_hash) [--neg]", text3);
+
+    const payload3 = extractPayloadJson(resp3);
+    if (!payload3) {
+      console.error("\n[error] PASS 3: cannot parse payload JSON from response text.");
+      process.exit(1);
+    }
+
+    console.log("\n[summary]");
+    console.log(summarizeGuardrail(payload3));
+
+    const action3 = payload3?.guardrail?.action;
+    if (action3 === "ALLOW") {
+      console.error("\n[error] PASS 3: expected NOT ALLOW with wrong plan_hash.");
+      process.exit(1);
+    }
+
+    // PASS 4: correct plan_hash, WRONG receipt_id
+    const badReceiptId = mutateTail(receipt.receipt_id);
+    const resp4 = await callAssess({
+      signals,
+      confirm: {
+        mode: "EXECUTE",
+        receipt_id: badReceiptId,
+        plan_hash: receipt.plan_hash,
+      },
+    });
+
+    const text4 = extractText(resp4);
+    printSection("PASS 4 (wrong receipt_id) [--neg]", text4);
+
+    const payload4 = extractPayloadJson(resp4);
+    if (!payload4) {
+      console.error("\n[error] PASS 4: cannot parse payload JSON from response text.");
+      process.exit(1);
+    }
+
+    console.log("\n[summary]");
+    console.log(summarizeGuardrail(payload4));
+
+    const action4 = payload4?.guardrail?.action;
+    if (action4 === "ALLOW") {
+      console.error("\n[error] PASS 4: expected NOT ALLOW with wrong receipt_id.");
+      process.exit(1);
+    }
+
+    console.log("\n[ok] Negative receipt tests passed: PASS 3/4 were rejected (not ALLOW).");
   }
 }
 
