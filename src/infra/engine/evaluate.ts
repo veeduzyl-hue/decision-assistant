@@ -72,14 +72,18 @@ export function evaluate(signals: DecisionSignal[], config: AppConfig): PolicyDe
     };
   }
 
+  const warnSuggestedExits: PolicyDecision["suggestedExits"] = [
+    "TIMEBOX_10",
+    "VALIDATE_FIRST",
+  ];
   let baseAction: PolicyDecision["action"] = "ALLOW";
   let baseReason = "No high-cost signals detected.";
-  let baseSuggestedExits: string[] | undefined = undefined;
+  let baseSuggestedExits: PolicyDecision["suggestedExits"] | undefined = undefined;
 
   if (filesTouched >= warn) {
     baseAction = "WARN";
     baseReason = `High change amplification detected (files_touched=${filesTouched}).`;
-    baseSuggestedExits = ["TIMEBOX_10", "VALIDATE_FIRST"];
+    baseSuggestedExits = warnSuggestedExits;
   }
 
   /**
@@ -138,7 +142,7 @@ export function evaluate(signals: DecisionSignal[], config: AppConfig): PolicyDe
     return {
       action: "WARN",
       reason: reasons.join("；"),
-      suggestedExits: ["TIMEBOX_10", "VALIDATE_FIRST"],
+      suggestedExits: warnSuggestedExits,
     };
   }
 
@@ -146,7 +150,7 @@ export function evaluate(signals: DecisionSignal[], config: AppConfig): PolicyDe
     return {
       action: "WARN",
       reason: baseReason,
-      suggestedExits: baseSuggestedExits ?? ["TIMEBOX_10", "VALIDATE_FIRST"],
+      suggestedExits: baseSuggestedExits ?? warnSuggestedExits,
     };
   }
 
