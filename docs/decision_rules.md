@@ -80,6 +80,72 @@ over early interruption based on weak signals.
 
 ---
 
+### 3.2 AI Momentum Override (R3)
+
+**Source:** `src/rules/r3_ai_momentum_override.ts`
+
+#### Trigger Signals
+
+- intent text (active_goal / intent)
+- files_touched
+- diff_lines_total
+- new_files
+- touches_package_json
+- touches_lockfile
+- touched_paths (infra/, docker/, terraform/)
+
+#### Detection Logic
+
+- weak_intent := intent length < 20 **OR** (generic intent and no file/module tokens)
+- amplification_high := files_touched >= 8 **OR** diff_lines_total >= 400 **OR** new_files >= 6
+- boundary_cross := touches_package_json **OR** touches_lockfile **OR** touched_paths includes infra/ or docker/ or terraform/
+- hit := weak_intent **AND** (amplification_high **OR** boundary_cross)
+
+#### Risk Hypothesis
+
+When intent is weak and change amplification or boundary crossing is high,
+execution risk is being driven by momentum rather than a clear goal.
+
+#### Threshold Rationale
+
+Thresholds are tuned to be conservative and deterministic:
+short or generic intent plus explicit amplification/boundary signals
+before requiring confirmation.
+
+#### Trigger Examples
+
+- "refactor" + files_touched=10 => hit
+- "cleanup" + touches_package_json=true => hit
+- "Update src/server.ts to validate receipt flow" + files_touched=10 => no hit
+
+#### Expected Intervention
+
+- Return `REQUIRE_CONFIRM` with a concrete boundary:
+  - timebox 20m
+  - max_files 2
+  - forbid_new_deps true
+  - forbid_protected_paths false
+
+#### Output Shape (exact)
+
+```json
+{
+  "rule_id": "r3_ai_momentum_override",
+  "hit": true,
+  "verdict": "REQUIRE_CONFIRM",
+  "reasons": [
+    "weak_intent: intent_short(8)",
+    "amplification_high: files_touched=10 (>= 8)"
+  ],
+  "boundary": {
+    "timebox_minutes": 20,
+    "max_files": 2,
+    "forbid_new_deps": true,
+    "forbid_protected_paths": false
+  }
+}
+```
+
 ## 4. v0.2 — Decision Infra & Guardrail (Deterministic)
 
 Starting from **v0.2**, Decision Assistant introduces a deterministic
