@@ -141,3 +141,5 @@ export const defaultConfig: AppConfig = {
     artifacts_dir: "src/artifacts",
   },
 };
+
+export default defaultConfig;
