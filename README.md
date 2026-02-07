@@ -142,6 +142,18 @@ Key invariants you must not break:
 - no extra lifecycle states beyond the normative set
 - consumption must be idempotent
 
+### Verifiable Evidence
+
+A read-only server roundtrip demonstration:
+👉 [decision-assistant-roundtrip-demo](https://github.com/veeduzyl-hue/decision-assistant-roundtrip-demo)
+
+This repository contains a deterministic, CI-verifiable demonstration of the
+Decision Assistant server roundtrip:
+
+REQUIRE_CONFIRM → EXECUTE → REJECT
+
+It is intentionally read-only and exists solely as an evidence artifact.
+
 ---
 
 ## License
