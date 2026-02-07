@@ -1,83 +1,133 @@
 # Decision Assistant
 
-Decision Assistant is a **server-authoritative decision guardrail** for developers,
-built as a Cursor MCP plugin.
+Decision Assistant is a Cursor MCP plugin that enforces **decision receipts** —
+a server-authoritative mechanism that makes high-risk engineering decisions
+explicit, auditable, and non-repeatable.
 
-It intervenes at **decision time**, not code time.
+This tool does **not** suggest what you should do.
+It decides whether an action is allowed to proceed.
 
 ---
 
 ## What This Is
 
-- A deterministic decision evaluation engine
-- A guardrail that can **BLOCK**, **REQUIRE_CONFIRM**, or **ALLOW**
-- A system that makes risky decisions **explicit, auditable, and confirmable**
+Decision Assistant is a **decision interruption layer**.
 
-This is **not**:
-- an AI copilot
-- a refactoring tool
-- a recommendation engine
+When risky conditions are detected, execution is stopped and replaced with a
+**receipt-based confirmation flow**. Only an explicit, verified receipt can
+unlock execution.
 
----
-
-## Core Concept: Receipt-Based Confirmation (v0.2)
-
-When a decision is risky but not blocked, the system issues a **receipt**.
-
-A receipt is:
-- **Random**
-- **Single-use**
-- **Bound to exactly one plan_hash**
-- **Validated and consumed only by the server**
-
-Lifecycle:
-
-```
-missing → active → consumed
-```
-
-All receipt semantics are defined in:
-
-```
-docs/receipt_semantics.md
-```
-
-This document is **non-negotiable** and defines frozen product semantics.
+This is designed for:
+- Independent developers
+- Small engineering teams
+- High-leverage refactors and architectural changes
 
 ---
 
-## Architecture Boundaries
+## Core Concept: Decision Receipts
 
-- `assess()` is **pure**
-- All persistence and validation happen in `server.ts`
-- Receipts are stored locally as append-only JSONL:
+A **receipt** represents a single, explicit authorization to proceed with a
+specific execution plan.
 
-```
-~/.decision-assistant/receipts.jsonl
-```
+### Receipt Properties (Frozen Since v0.3)
+
+- **receipt_id**
+  - Random, one-time identifier
+  - Not derived from plan content
+  - Not reusable
+
+- **plan_hash**
+  - Deterministic hash of the evaluated execution plan
+  - Changes if the plan changes
+
+- **Lifecycle (Server-Authoritative)**
+  ```
+  missing → active → consumed
+  ```
+
+Once consumed, a receipt can never be reused.
+
+These semantics are **normatively frozen** and enforced by tests.
 
 ---
 
-## Demo
+## Why Receipts (Not Prompts, Not Suggestions)
 
-Run the full roundtrip demo (positive + negative paths):
+Most AI tools *advise*.
+Decision Assistant *enforces*.
 
-```bash
-npx tsx examples/demo_guardrail_roundtrip.ts --auto --neg
-```
+Receipts ensure:
+- No silent retries
+- No accidental replays
+- No client-side overrides
+- Clear accountability at the moment of execution
 
-This validates:
+This shifts AI from “assistant” to **execution boundary**.
 
-- normal confirmation
-- stale plan_hash rejection
-- invalid / replayed receipt rejection
+---
+
+## Architecture Overview
+
+- **detect_triggers**
+  Collects and normalizes signals (may use I/O).
+
+- **assess (PURE)**
+  Computes risk and guardrail decisions.
+  - No I/O
+  - No state reads
+  - Fully deterministic
+
+- **Server (Authoritative)**
+  - Issues receipts
+  - Validates confirmations
+  - Consumes receipts
+  - Persists append-only evidence
+
+---
+
+## Receipt Semantics (Frozen)
+
+The following are **non-negotiable invariants**:
+
+- receipt validation and consumption occur **only on the server**
+- assess() must remain a pure function
+- no additional receipt lifecycle states may be introduced
+- clients must never infer receipt state
+
+Any change violating these rules is a **breaking change**.
+
+---
+
+## Versioning
+
+- **v0.3** — Receipt semantics frozen
+- Future versions may extend rules, signals, or UX
+- Receipt semantics will not change without an explicit major version bump
+
+---
+
+## This Is Not
+
+- ❌ A refactoring assistant
+- ❌ A code generator
+- ❌ A suggestion engine
+- ❌ A productivity chatbot
+
+This is a **discipline tool**.
 
 ---
 
 ## Status
 
-- v0.2 receipt semantics: ✅ frozen
-- server-authoritative lifecycle: ✅ implemented
-- negative-path tests: ✅ passing
+- Receipt semantics: ✅ Frozen and enforced
+- Roundtrip demo: ✅ PASS
+- CI semantic guards: ✅ Active
 
-Next versions will **extend**, not redefine, these semantics.
+---
+
+## Philosophy
+
+> Execution should be easy.
+> Decisions should be expensive.
+
+Decision Assistant exists to enforce that difference.

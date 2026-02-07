@@ -10,7 +10,9 @@
 
     "verify:guardrail": "npm run build && npx tsx scripts/verify_guardrail.ts",
     "verify:ai_momentum_override": "npm run build && node scripts/verify_ai_momentum_override.js",
-    "release:local": "npm run verify:guardrail"
+    "release:local": "npm run verify:guardrail",
+    "test": "vitest",
+    "test:semantics": "vitest tests/receipt_semantics.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
@@ -18,7 +20,8 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^1.0.0"
   }
 }
 

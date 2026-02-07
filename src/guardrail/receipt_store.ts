@@ -1,7 +1,9 @@
 // src/guardrail/receipt_store.ts
 //
-// Receipt store (local-only, append-only JSONL)
-// MUST match docs/receipt_semantics.md (v0.2)
+// Receipt lifecycle authority (server runtime) + local evidence log (append-only JSONL).
+// MUST match docs/receipt_semantics.md (v0.2+):
+// - receipt authority is server-side
+// - JSONL is evidence only (MUST NOT be used to reconstruct or infer state)
 //
 // Line format (one event per line):
 // {
@@ -12,7 +14,7 @@
 //   "scope": "this_call_only"
 // }
 
-import { existsSync, mkdirSync, readFileSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -54,26 +56,65 @@ function appendEvent(ev: ReceiptEvent): void {
 }
 
 /**
- * Issue a receipt (append-only).
+ * Server-authoritative in-memory lifecycle state.
+ * This Map is the ONLY source for getReceiptState().
+ *
+ * NOTE:
+ * - This is per-process runtime state (not persisted).
+ * - JSONL is evidence only; do NOT read it to infer state.
+ */
+const receiptState = new Map<string, { status: "active" | "consumed"; plan_hash: string; scope: ReceiptScope }>();
+
+/**
+ * Issue a receipt.
  * Server MUST call this when returning guardrail.action=REQUIRE_CONFIRM.
  */
 export function issueReceipt(r: ReceiptRecord): void {
   if (!r?.receipt_id || !r?.plan_hash) return;
+
+  const scope: ReceiptScope = r.scope ?? "this_call_only";
+
+  // Authoritative state update
+  receiptState.set(r.receipt_id, {
+    status: "active",
+    plan_hash: r.plan_hash,
+    scope,
+  });
+
+  // Evidence append
   appendEvent({
     ts: nowIso(),
     action: "issue",
     receipt_id: r.receipt_id,
     plan_hash: r.plan_hash,
-    scope: r.scope ?? "this_call_only",
+    scope,
   });
 }
 
 /**
- * Consume a receipt (append-only).
- * Server MUST call this exactly once when accepting confirm: { mode:"EXECUTE", ... }.
+ * Consume a receipt.
+ * Server MUST call this when accepting confirm: { mode:"EXECUTE", ... }.
+ *
+ * This operation is monotonic: active -> consumed, and consumed stays consumed.
+ * No additional lifecycle states are introduced.
  */
-export function consumeReceipt(receipt_id: string, plan_hash: string, scope: ReceiptScope = "this_call_only"): void {
+export function consumeReceipt(
+  receipt_id: string,
+  plan_hash: string,
+  scope: ReceiptScope = "this_call_only"
+): void {
   if (!receipt_id || !plan_hash) return;
+
+  const existing = receiptState.get(receipt_id);
+
+  // Authoritative state update (monotonic)
+  receiptState.set(receipt_id, {
+    status: "consumed",
+    plan_hash: existing?.plan_hash ?? plan_hash,
+    scope: existing?.scope ?? scope,
+  });
+
+  // Evidence append
   appendEvent({
     ts: nowIso(),
     action: "consume",
@@ -84,59 +125,18 @@ export function consumeReceipt(receipt_id: string, plan_hash: string, scope: Rec
 }
 
 /**
- * Returns the current state for a receipt_id based on the append-only log.
+ * Returns the current lifecycle state for a receipt_id.
  *
- * Semantics (docs-aligned):
- * - missing: receipt_id never issued
- * - active: last relevant event is "issue"
- * - consumed: last relevant event is "consume"
- *
- * Note: we track the LAST event for the receipt_id (event-sourced).
+ * IMPORTANT:
+ * This function MUST NOT read local logs/files.
+ * JSONL is evidence only and MUST NOT be used to infer lifecycle.
  */
 export function getReceiptState(receipt_id: string): ReceiptState {
   if (!receipt_id) return { status: "missing" };
-  if (!existsSync(STORE_FILE)) return { status: "missing" };
 
-  let last: ReceiptEvent | null = null;
+  const s = receiptState.get(receipt_id);
+  if (!s) return { status: "missing" };
 
-  try {
-    const raw = readFileSync(STORE_FILE, "utf8");
-    const lines = raw.split(/\r?\n/);
-
-    for (const line of lines) {
-      const s = line.trim();
-      if (!s) continue;
-
-      let ev: any;
-      try {
-        ev = JSON.parse(s);
-      } catch {
-        continue; // ignore malformed lines
-      }
-
-      if (!ev || ev.receipt_id !== receipt_id) continue;
-      if (ev.action !== "issue" && ev.action !== "consume") continue;
-      if (typeof ev.plan_hash !== "string") continue;
-
-      // Normalize scope to v0.2 default if absent / invalid
-      const scope: ReceiptScope = ev.scope === "this_call_only" ? "this_call_only" : "this_call_only";
-
-      last = {
-        ts: typeof ev.ts === "string" ? ev.ts : nowIso(),
-        action: ev.action,
-        receipt_id: ev.receipt_id,
-        plan_hash: ev.plan_hash,
-        scope,
-      };
-    }
-  } catch {
-    return { status: "missing" };
-  }
-
-  if (!last) return { status: "missing" };
-
-  if (last.action === "issue") {
-    return { status: "active", plan_hash: last.plan_hash, scope: last.scope };
-  }
-  return { status: "consumed", plan_hash: last.plan_hash, scope: last.scope };
+  if (s.status === "active") return { status: "active", plan_hash: s.plan_hash, scope: s.scope };
+  return { status: "consumed", plan_hash: s.plan_hash, scope: s.scope };
 }

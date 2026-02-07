@@ -7,7 +7,7 @@ import { assess } from "./tools/assess.js";
 import { plan } from "./tools/plan.js";
 import { followup } from "./tools/followup.js";
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { createMcpServer } from "./infra/mcp_server.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import { z } from "zod";
@@ -146,17 +146,10 @@ function normalizeConfirm(
 async function main() {
   const config = loadConfig();
 
-  const server = new Server(
-    {
-      name: config.app.name,
-      version: config.app.version,
-    },
-    {
-      capabilities: {
-        tools: {},
-      },
-    }
-  );
+  const server = createMcpServer({
+    name: config.app.name,
+    version: config.app.version,
+  });
 
   // ✅ Minimal Observability: local-only telemetry (append-only JSONL)
   // Disable by env: DA_TELEMETRY=0

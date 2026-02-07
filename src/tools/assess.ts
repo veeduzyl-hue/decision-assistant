@@ -13,10 +13,7 @@ import { evaluateGuardrail } from "../guardrail/evaluate_guardrail.js";
 import type { DecisionSignal, PolicyDecision } from "../infra/types/index.js";
 import type { GuardrailDecision, GuardrailReceipt } from "../guardrail/types.js";
 
-// 关键：不用 node: 前缀，避免你环境里再次触发兼容性红线
-import { spawnSync } from "child_process";
-import { existsSync } from "fs";
-import { basename, join } from "path";
+// ✅ PURE ONLY: crypto is allowed (no I/O)
 import { createHash, randomUUID } from "crypto";
 
 function renderReasons(reasons: any): string[] {
@@ -38,7 +35,6 @@ function renderReasons(reasons: any): string[] {
   return [String(reasons)];
 }
 
-
 /**
  * confirm 语义收敛：
  * - ACK：仅确认收到 REQUIRE_CONFIRM（不放行）
@@ -58,8 +54,8 @@ export type ConfirmInput =
 
 /**
  * NOTE:
- * - 你的脚本传入的 signals 已经包含 files_touched_per_change_median / lines_added / ...
- * - 为了兼容，我们允许 signals 在 TriggerSignals 基础上携带额外字段
+ * - signals 允许携带额外字段（TriggerSignals + extras）
+ * - assess() MUST remain pure: NO I/O, NO state reads
  */
 export type AssessInput = {
   config?: AppConfig;
@@ -78,7 +74,7 @@ export type AssessOutput = {
 };
 
 /* ------------------------------------------------------------------ */
-/* Receipt helpers                                                     */
+/* Receipt helpers (PURE)                                              */
 /* ------------------------------------------------------------------ */
 
 function stableStringify(obj: unknown): string {
@@ -106,8 +102,7 @@ function makeReceiptId(): string {
 }
 
 /**
- * 用“计划摘要”生成 plan_hash：
- * 目标：用户签收的是“同一份计划”，不是一个布尔开关。
+ * 用“计划摘要”生成 plan_hash（PURE）
  */
 function buildPlanHash(args: {
   infraSignals: DecisionSignal[];
@@ -130,65 +125,8 @@ function buildPlanHash(args: {
 }
 
 /* ------------------------------------------------------------------ */
-/* Signal mappings                                                     */
+/* Signal mappings (PURE)                                              */
 /* ------------------------------------------------------------------ */
-
-type GitDiffSignals = {
-  diff_lines_total: number;
-  touches_package_json: boolean;
-  touches_lockfile: boolean;
-};
-
-function safeGitDiffSignals(): GitDiffSignals {
-  const fallback: GitDiffSignals = {
-    diff_lines_total: 0,
-    touches_package_json: false,
-    touches_lockfile: false,
-  };
-
-  let diffLinesTotal = fallback.diff_lines_total;
-  try {
-    const numstat = spawnSync("git", ["diff", "--numstat"], { encoding: "utf8" });
-    if (numstat.status === 0 && typeof numstat.stdout === "string") {
-      const lines = numstat.stdout.trim().split(/\r?\n/).filter(Boolean);
-      for (const line of lines) {
-        const parts = line.split("\t");
-        if (parts.length < 2) continue;
-        const added = Number(parts[0]);
-        const deleted = Number(parts[1]);
-        if (Number.isFinite(added)) diffLinesTotal += added;
-        if (Number.isFinite(deleted)) diffLinesTotal += deleted;
-      }
-    }
-  } catch {
-    diffLinesTotal = 0;
-  }
-
-  let touchesPackageJson = fallback.touches_package_json;
-  let touchesLockfile = fallback.touches_lockfile;
-  try {
-    const nameOnly = spawnSync("git", ["diff", "--name-only"], { encoding: "utf8" });
-    if (nameOnly.status === 0 && typeof nameOnly.stdout === "string") {
-      const files = nameOnly.stdout.trim().split(/\r?\n/).filter(Boolean);
-      const lockfiles = new Set(["package-lock.json", "pnpm-lock.yaml", "yarn.lock"]);
-      for (const f of files) {
-        const base = basename(f);
-        if (base === "package.json") touchesPackageJson = true;
-        if (lockfiles.has(base)) touchesLockfile = true;
-        if (touchesPackageJson && touchesLockfile) break;
-      }
-    }
-  } catch {
-    touchesPackageJson = false;
-    touchesLockfile = false;
-  }
-
-  return {
-    diff_lines_total: diffLinesTotal,
-    touches_package_json: touchesPackageJson,
-    touches_lockfile: touchesLockfile,
-  };
-}
 
 function toSignalsV01(ts: TriggerSignals & Record<string, unknown>): Signals {
   const evo: any = {};
@@ -199,8 +137,9 @@ function toSignalsV01(ts: TriggerSignals & Record<string, unknown>): Signals {
   evo.refactor_days = Number((ts as any).refactor_days ?? 0);
   evo.no_user_feature_delivery_days = Number((ts as any).ship_gap_days ?? 0);
 
-  const decisionFilePath = join(process.cwd(), ".decision_assistant", "decision.md");
-  evo.decision_file_missing = !existsSync(decisionFilePath);
+  // NOTE: decision_file_missing MUST be injected by upstream (detect_triggers / server),
+  // NOT computed here (no fs access in assess).
+  evo.decision_file_missing = Boolean((ts as any).decision_file_missing ?? false);
   evo.decision_file_invalid = false;
   evo.refactor_scope_expanding = false;
 
@@ -238,16 +177,12 @@ function toSignalsV01(ts: TriggerSignals & Record<string, unknown>): Signals {
 }
 
 /**
- * Phase 1+ infra signals:
+ * Phase 1+ infra signals (PURE):
  * Convert TriggerSignals(+extra) -> DecisionSignal[]
  *
- * Required for cold rules:
- * - files_touched_per_change_median (number)
- * - lines_added (number)
- * - active_duration_ms (number)
- * - input_source (string)
- * - active_goal (string)
- * - touched_paths (string[])
+ * IMPORTANT:
+ * - No git/fs/process calls here.
+ * - Derived git signals MUST be computed upstream and injected into `signals`.
  */
 function toInfraSignals(ts: TriggerSignals & Record<string, unknown>): DecisionSignal[] {
   const infraSignals: DecisionSignal[] = [];
@@ -273,7 +208,6 @@ function toInfraSignals(ts: TriggerSignals & Record<string, unknown>): DecisionS
     }
   };
 
-  const gitSignals = safeGitDiffSignals();
   const numberOr = (v: unknown, fallback: number): number =>
     typeof v === "number" && Number.isFinite(v) ? v : fallback;
   const booleanOr = (v: unknown, fallback: boolean): boolean =>
@@ -282,35 +216,25 @@ function toInfraSignals(ts: TriggerSignals & Record<string, unknown>): DecisionS
   // Existing: files_touched
   pushNumber("files_touched", (ts as any).files_touched);
 
-  // Phase 1 cold rules: R2/R3/R4
+  // Phase 1 cold rules: R2/R3/R4 (expected to be present or omitted)
   pushNumber("files_touched_per_change_median", (ts as any).files_touched_per_change_median);
   pushNumber("lines_added", (ts as any).lines_added);
   pushNumber("active_duration_ms", (ts as any).active_duration_ms);
 
   pushString("input_source", (ts as any).input_source);
   pushString("active_goal", (ts as any).active_goal);
-
   pushStringArray("touched_paths", (ts as any).touched_paths);
 
-  // Latent R3 (FULL): git diff derived signals
-  pushNumber(
-    "diff_lines_total",
-    numberOr((ts as any).diff_lines_total, gitSignals.diff_lines_total)
-  );
-  pushBoolean(
-    "touches_package_json",
-    booleanOr((ts as any).touches_package_json, gitSignals.touches_package_json)
-  );
-  pushBoolean(
-    "touches_lockfile",
-    booleanOr((ts as any).touches_lockfile, gitSignals.touches_lockfile)
-  );
+  // Latent R3 (FULL): git diff derived signals (MUST be injected upstream)
+  pushNumber("diff_lines_total", numberOr((ts as any).diff_lines_total, 0));
+  pushBoolean("touches_package_json", booleanOr((ts as any).touches_package_json, false));
+  pushBoolean("touches_lockfile", booleanOr((ts as any).touches_lockfile, false));
 
   return infraSignals;
 }
 
 /* ------------------------------------------------------------------ */
-/* assess                                                              */
+/* assess (PURE)                                                       */
 /* ------------------------------------------------------------------ */
 
 export function assess(input: AssessInput): AssessOutput {
@@ -328,15 +252,14 @@ export function assess(input: AssessInput): AssessOutput {
   // 3) rule override (type-stable)
   const decision: ReturnType<typeof decide> =
     rule_hit.hit && decisionRaw.decision === "SHIP"
-    ? {
-      ...decisionRaw,
-      decision: ("SCOPED_REFACTOR" as (typeof decisionRaw)["decision"]),
-      reasons: [
-        ...renderReasons(decisionRaw.reasons),
-        "[rule_override] Refactor Time Blackhole rule hit; override SHIP -> SCOPED_REFACTOR.",
-      ],
-    }
-  
+      ? {
+          ...decisionRaw,
+          decision: ("SCOPED_REFACTOR" as (typeof decisionRaw)["decision"]),
+          reasons: [
+            ...renderReasons(decisionRaw.reasons),
+            "[rule_override] Refactor Time Blackhole rule hit; override SHIP -> SCOPED_REFACTOR.",
+          ],
+        }
       : decisionRaw;
 
   // 4) v0.2 infra + guardrail (Phase 1 surface)
@@ -345,17 +268,13 @@ export function assess(input: AssessInput): AssessOutput {
   const guardrailBase = evaluateGuardrail({ infraSignals, policy });
 
   /**
-   * -------------------------
-   * REQUIRE_CONFIRM behavior
-   * -------------------------
-   * 约定：
-   * - REQUIRE_CONFIRM 必须返回 receipt + executed:false + confirmation.required:true
-   * - EXECUTE 放行后，ALLOW 的 receipt_id 必须复用用户签收的 confirm.receipt_id（不得换单号）
+   * REQUIRE_CONFIRM behavior:
+   * - REQUIRE_CONFIRM returns receipt + executed:false + confirmation.required:true
+   * - EXECUTE allow: receipt_id MUST reuse confirm.receipt_id (no new receipt_id)
    */
   if (guardrailBase.action === "REQUIRE_CONFIRM") {
     const plan_hash = buildPlanHash({ infraSignals, policy, guardrail: guardrailBase });
 
-    // helper：仅在需要“发新回执”时生成
     const newReceipt = (): GuardrailReceipt => ({
       receipt_id: makeReceiptId(),
       plan_hash,
@@ -364,7 +283,7 @@ export function assess(input: AssessInput): AssessOutput {
 
     const confirm = input.confirm;
 
-    // (A) 首次：无 confirm → 发新回执
+    // (A) first call: no confirm -> issue new receipt (pure value)
     if (!confirm) {
       const receipt = newReceipt();
       return {
@@ -383,7 +302,7 @@ export function assess(input: AssessInput): AssessOutput {
       };
     }
 
-    // (B) ACK：仅确认收到 → 仍发新回执（用户需对“最新回执”进行 EXECUTE）
+    // (B) ACK: still require confirm; issue a fresh receipt (pure value)
     if (confirm.mode === "ACK") {
       const receipt = newReceipt();
       return {
@@ -406,9 +325,8 @@ export function assess(input: AssessInput): AssessOutput {
       };
     }
 
-    // (C) EXECUTE：校验 plan_hash
+    // (C) EXECUTE: validate plan_hash only (no store reads)
     if (confirm.mode === "EXECUTE") {
-      // 校验失败：拒绝并发新回执
       if (confirm.plan_hash !== plan_hash) {
         const receipt = newReceipt();
         return {
@@ -419,8 +337,7 @@ export function assess(input: AssessInput): AssessOutput {
           policy,
           guardrail: {
             action: "REQUIRE_CONFIRM",
-            reason:
-              guardrailBase.reason + " (confirmation rejected: receipt is stale or plan changed)",
+            reason: guardrailBase.reason + " (confirmation rejected: receipt is stale or plan changed)",
             receipt,
             executed: false,
             confirmation: {
@@ -434,7 +351,7 @@ export function assess(input: AssessInput): AssessOutput {
         };
       }
 
-      // ✅ 放行：复用用户签收的 receipt_id（不得换单号）
+      // allow: reuse user-confirmed receipt_id
       return {
         rule_hit,
         risk,

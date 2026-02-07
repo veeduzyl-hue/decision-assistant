@@ -35,3 +35,4 @@ We use **Conventional Commits**:
 - Keep PRs focused
 - Describe the decision logic change clearly
 - Explain **why**, not just what
+Any change that breaks receipt_semantics.test.ts MUST be justified as a semantic-breaking change
