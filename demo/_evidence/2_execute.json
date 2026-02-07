@@ -1,0 +1,157 @@
+{
+  "version": "v0.3d",
+  "step": "execute",
+  "ts": "2026-02-07T13:47:55.220Z",
+  "summary": {
+    "guardrail_action": "ALLOW",
+    "executed": true,
+    "receipt_id": "gr_d2faeb2bf80d",
+    "plan_hash": "plan_e7941698abae",
+    "confirmation": {
+      "required": false,
+      "confirmed": true,
+      "confirmed_plan_hash": "plan_e7941698abae",
+      "confirmed_receipt_id": "gr_d2faeb2bf80d"
+    },
+    "reason": "User confirmed execution for plan_hash plan_e7941698abae."
+  },
+  "full_decision_payload": {
+    "rule_hit": {
+      "rule_id": "refactor_time_blackhole",
+      "hit": false,
+      "reasons": [],
+      "signals": {
+        "files_touched": 14,
+        "files_touched_per_change_median": 6,
+        "lines_added": 900,
+        "active_duration_ms": 10800000,
+        "input_source": "demo",
+        "active_goal": "large refactor / architectural change",
+        "touched_paths": [
+          "src/",
+          "docs/",
+          "package.json"
+        ],
+        "diff_lines_total": 900,
+        "touches_package_json": true,
+        "touches_lockfile": true
+      }
+    },
+    "risk": {
+      "score": 0,
+      "reasons": [],
+      "breakdown": {
+        "timeSink": 0,
+        "amplification": 0,
+        "rework": 0,
+        "smells": 0,
+        "adjust": 0
+      }
+    },
+    "decision": {
+      "decision": "SHIP",
+      "risk_score": 0,
+      "reasons": []
+    },
+    "infraSignals": [
+      {
+        "kind": "files_touched",
+        "value": 14,
+        "context": {
+          "source": "TriggerSignals"
+        }
+      },
+      {
+        "kind": "files_touched_per_change_median",
+        "value": 6,
+        "context": {
+          "source": "TriggerSignals"
+        }
+      },
+      {
+        "kind": "lines_added",
+        "value": 900,
+        "context": {
+          "source": "TriggerSignals"
+        }
+      },
+      {
+        "kind": "active_duration_ms",
+        "value": 10800000,
+        "context": {
+          "source": "TriggerSignals"
+        }
+      },
+      {
+        "kind": "input_source",
+        "value": "demo",
+        "context": {
+          "source": "TriggerSignals"
+        }
+      },
+      {
+        "kind": "active_goal",
+        "value": "large refactor / architectural change",
+        "context": {
+          "source": "TriggerSignals"
+        }
+      },
+      {
+        "kind": "touched_paths",
+        "value": [
+          "src/",
+          "docs/",
+          "package.json"
+        ],
+        "context": {
+          "source": "TriggerSignals"
+        }
+      },
+      {
+        "kind": "diff_lines_total",
+        "value": 900,
+        "context": {
+          "source": "TriggerSignals"
+        }
+      },
+      {
+        "kind": "touches_package_json",
+        "value": true,
+        "context": {
+          "source": "TriggerSignals"
+        }
+      },
+      {
+        "kind": "touches_lockfile",
+        "value": true,
+        "context": {
+          "source": "TriggerSignals"
+        }
+      }
+    ],
+    "policy": {
+      "action": "WARN",
+      "reason": "Warning threshold exceeded: this change touches 14 files (>= 8). | [latent:ai_momentum_override] files_touched=14 (>= 8)；diff_lines_total=900 (>= 400)；dependency file touched (package.json/lockfile)",
+      "suggestedExits": [
+        "TIMEBOX_10",
+        "VALIDATE_FIRST"
+      ]
+    },
+    "guardrail": {
+      "action": "ALLOW",
+      "reason": "User confirmed execution for plan_hash plan_e7941698abae.",
+      "receipt": {
+        "receipt_id": "gr_d2faeb2bf80d",
+        "plan_hash": "plan_e7941698abae",
+        "scope": "this_call_only"
+      },
+      "executed": true,
+      "confirmation": {
+        "required": false,
+        "confirmed": true,
+        "confirmed_plan_hash": "plan_e7941698abae",
+        "confirmed_receipt_id": "gr_d2faeb2bf80d"
+      }
+    }
+  }
+}
