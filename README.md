@@ -1,143 +1,83 @@
 # Decision Assistant
 
-A deterministic decision guard for developers.
+Decision Assistant is a **server-authoritative decision guardrail** for developers,
+built as a Cursor MCP plugin.
 
-It does not help you code faster.  
-It intervenes at **decision time**, when execution is about to cross a risk boundary.
-
-- Deterministic rules only (no LLMs in the decision path)
-- Hard guardrails: `ALLOW` / `REQUIRE_CONFIRM` / `BLOCK`
-- Explicit confirmation required to proceed
-- Local-only observability, no analytics backend
-
-Built for developers who want the system to stop them  
-when they won’t stop themselves.
+It intervenes at **decision time**, not code time.
 
 ---
 
-## What It Does
+## What This Is
 
-Decision Assistant intervenes **at decision time**, not code time.
+- A deterministic decision evaluation engine
+- A guardrail that can **BLOCK**, **REQUIRE_CONFIRM**, or **ALLOW**
+- A system that makes risky decisions **explicit, auditable, and confirmable**
 
-It detects high-risk engineering behavior and forces an explicit choice when:
-
-- Change amplification spikes  
-- AI-generated code momentum gets out of control  
-- Your actions drift away from your stated goal  
-- A refactor is quietly turning into a time sink  
-
-When triggered, it **interrupts execution** and requires explicit confirmation to proceed.
-
-No silent continuation.
+This is **not**:
+- an AI copilot
+- a refactoring tool
+- a recommendation engine
 
 ---
 
-## What It Is Not
+## Core Concept: Receipt-Based Confirmation (v0.2)
 
-This tool is intentionally limited.
+When a decision is risky but not blocked, the system issues a **receipt**.
 
-It does **not**:
+A receipt is:
+- **Random**
+- **Single-use**
+- **Bound to exactly one plan_hash**
+- **Validated and consumed only by the server**
 
-- Optimize or refactor your code  
-- Explain risk scores or metrics  
-- Provide dashboards or analytics  
-- Act as a friendly coding assistant  
-- Let you tweak thresholds to feel better  
+Lifecycle:
 
-If you want advice, suggestions, or encouragement — this is not the tool.
+```
+missing → active → consumed
+```
 
----
+All receipt semantics are defined in:
 
-## How It Works (Phase 1)
+```
+docs/receipt_semantics.md
+```
 
-- Deterministic rules only  
-- No LLMs in the decision path  
-- Cold-first, single-hit execution  
-- Hard guardrail semantics:
-  - `ALLOW`
-  - `REQUIRE_CONFIRM`
-  - `BLOCK`
-
-If the system interrupts you, it is by design.
-
-**Discipline is the product.**
+This document is **non-negotiable** and defines frozen product semantics.
 
 ---
 
-## Try It Locally (5 minutes)
+## Architecture Boundaries
 
-This repository includes a minimal round-trip demo that shows the full guardrail lifecycle:
-**REQUIRE_CONFIRM → explicit EXECUTE → ALLOW**, plus local-only observability.
+- `assess()` is **pure**
+- All persistence and validation happen in `server.ts`
+- Receipts are stored locally as append-only JSONL:
 
-### 1. Install dependencies
+```
+~/.decision-assistant/receipts.jsonl
+```
+
+---
+
+## Demo
+
+Run the full roundtrip demo (positive + negative paths):
 
 ```bash
-npm install
-npm run build
+npx tsx examples/demo_guardrail_roundtrip.ts --auto --neg
 ```
 
-### 2. Run the guardrail round-trip demo
+This validates:
 
-```bash
-npx tsx examples/demo_guardrail_roundtrip.ts
-```
-
-You will see:
-
-- A triggered `REQUIRE_CONFIRM`
-- A receipt (`receipt_id`, `plan_hash`)
-- A second execution with `mode=EXECUTE`
-- A final `ALLOW`
-
-### 3. Inspect local-only telemetry
-
-```bash
-npx tsx scripts/telemetry_report.ts --days 7
-```
-
-Telemetry is:
-
-- Local-only (JSONL file)
-- Append-only
-- Anonymous
-- Opt-out via `DA_TELEMETRY=0`
-
-Stored at:
-
-```
-~/.decision-assistant/telemetry.jsonl
-```
-
----
-
-## Who This Is For
-
-- Independent developers  
-- Builders using AI copilots  
-- People who repeatedly lose weeks to “just one more refactor”  
-- Anyone who wants a system that can say **“stop”** when they won’t  
-
-If you are optimizing for comfort, this tool will feel annoying.
+- normal confirmation
+- stale plan_hash rejection
+- invalid / replayed receipt rejection
 
 ---
 
 ## Status
 
-- Phase 1: Cold Rules Guardrail ✅  
-- Phase 2: Latent risk analysis (internal, not exposed)  
-- Phase 3+: Not decided yet  
+- v0.2 receipt semantics: ✅ frozen
+- server-authoritative lifecycle: ✅ implemented
+- negative-path tests: ✅ passing
 
-This project is opinionated on purpose.
-
----
-
-## Philosophy
-
-Most developer tools help you move faster.
-
-Decision Assistant helps you **not move when you shouldn’t**.
-
-That difference matters more than it sounds.
-
-> If you are afraid this tool might interrupt you too often,  
-> then you are probably the exact person it was built for.
+Next versions will **extend**, not redefine, these semantics.
