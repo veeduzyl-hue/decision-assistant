@@ -1,133 +1,149 @@
 # Decision Assistant
 
-Decision Assistant is a Cursor MCP plugin that enforces **decision receipts** —
-a server-authoritative mechanism that makes high-risk engineering decisions
-explicit, auditable, and non-repeatable.
+A Cursor **MCP server** that enforces deterministic **decision guardrails** for risky engineering actions.
+It does not “review” your code. It interrupts execution **at decision time** and emits a verifiable, machine-readable
+**evidence payload** (including a confirmation receipt when required).
 
-This tool does **not** suggest what you should do.
-It decides whether an action is allowed to proceed.
-
----
-
-## What This Is
-
-Decision Assistant is a **decision interruption layer**.
-
-When risky conditions are detected, execution is stopped and replaced with a
-**receipt-based confirmation flow**. Only an explicit, verified receipt can
-unlock execution.
-
-This is designed for:
-- Independent developers
-- Small engineering teams
-- High-leverage refactors and architectural changes
+- Deterministic rules (no LLM required)
+- Guardrail modes: `ALLOW` / `REQUIRE_CONFIRM` / `BLOCK`
+- Receipt semantics: **random receipt_id**, **plan-bound plan_hash**, **idempotent consumption**
+- Designed for “solo dev sanity” and CI-grade evidence
 
 ---
 
-## Core Concept: Decision Receipts
+## What it does
 
-A **receipt** represents a single, explicit authorization to proceed with a
-specific execution plan.
+When a change looks dangerous (scope explosion, refactor black hole patterns, dependency churn, etc.),
+Decision Assistant returns a **guardrail decision**:
 
-### Receipt Properties (Frozen Since v0.3)
+- `ALLOW` — proceed
+- `REQUIRE_CONFIRM` — blocked until explicit confirmation + receipt is provided
+- `BLOCK` — hard stop (policy threshold exceeded)
 
-- **receipt_id**
-  - Random, one-time identifier
-  - Not derived from plan content
-  - Not reusable
+In `REQUIRE_CONFIRM`, it returns a **receipt**:
 
-- **plan_hash**
-  - Deterministic hash of the evaluated execution plan
-  - Changes if the plan changes
+```json
+{
+  "receipt": {
+    "receipt_id": "gr_10af2f50c2ce",
+    "plan_hash": "plan_97d4da118562",
+    "scope": "this_call_only"
+  },
+  "confirmation": { "required": true },
+  "executed": false
+}
+```
 
-- **Lifecycle (Server-Authoritative)**
-  ```
-  missing → active → consumed
-  ```
+The user must re-run with:
 
-Once consumed, a receipt can never be reused.
+- `confirm.mode = "EXECUTE"`
+- `confirm.receipt_id` (must be reused)
+- `confirm.plan_hash` (must match current plan hash)
 
-These semantics are **normatively frozen** and enforced by tests.
-
----
-
-## Why Receipts (Not Prompts, Not Suggestions)
-
-Most AI tools *advise*.
-Decision Assistant *enforces*.
-
-Receipts ensure:
-- No silent retries
-- No accidental replays
-- No client-side overrides
-- Clear accountability at the moment of execution
-
-This shifts AI from “assistant” to **execution boundary**.
+If the plan changed, the EXECUTE is rejected and a **new receipt** is issued.
 
 ---
 
-## Architecture Overview
+## Install
 
-- **detect_triggers**
-  Collects and normalizes signals (may use I/O).
-
-- **assess (PURE)**
-  Computes risk and guardrail decisions.
-  - No I/O
-  - No state reads
-  - Fully deterministic
-
-- **Server (Authoritative)**
-  - Issues receipts
-  - Validates confirmations
-  - Consumes receipts
-  - Persists append-only evidence
+```bash
+npm install
+npm run build
+```
 
 ---
 
-## Receipt Semantics (Frozen)
+## Run semantic tests (receipt norms)
 
-The following are **non-negotiable invariants**:
+```bash
+npm run test:semantics
+```
 
-- receipt validation and consumption occur **only on the server**
-- assess() must remain a pure function
-- no additional receipt lifecycle states may be introduced
-- clients must never infer receipt state
-
-Any change violating these rules is a **breaking change**.
+Expected: all tests pass.
 
 ---
 
-## Versioning
+## Server roundtrip evidence demo (v0.3d)
 
-- **v0.3** — Receipt semantics frozen
-- Future versions may extend rules, signals, or UX
-- Receipt semantics will not change without an explicit major version bump
+This repository includes a deterministic “server roundtrip” evidence demo that proves:
+
+1) `REQUIRE_CONFIRM` issues `receipt_id` + `plan_hash`
+2) `EXECUTE` succeeds only when the receipt matches the plan hash (and reuses receipt_id)
+3) stale confirmations are rejected and re-issued
+
+### One command
+
+```bash
+npx tsx demo/demo_server_roundtrip.ts
+```
+
+Expected tail marker:
+
+```
+PASS: server roundtrip evidence
+{ "ok": true, "bundle": "server-roundtrip-evidence", "version": "v0.3d" }
+```
+
+### CI-style check
+
+```bash
+npx tsx scripts/ci/server_roundtrip_check.ts
+```
+
+This fails the process if the evidence marker is missing or any step exits non-zero.
 
 ---
 
-## This Is Not
+## How the demo is structured
 
-- ❌ A refactoring assistant
-- ❌ A code generator
-- ❌ A suggestion engine
-- ❌ A productivity chatbot
+- `demo/demo_require_confirm.ts`  
+  Finds a signals payload that lands on `REQUIRE_CONFIRM`, prints full payload, and persists:
+  - `demo/.demo_last.json` (last run context)
+  - `demo/_evidence/1_require_confirm.json` (evidence artifact)
 
-This is a **discipline tool**.
+- `demo/demo_execute.ts`  
+  Reads `demo/.demo_last.json` (or CLI args) and runs `EXECUTE` with the same receipt.
+
+- `demo/demo_reject.ts`  
+  Mutates the signals to force **plan_hash drift**, attempts EXECUTE with stale plan_hash, and validates rejection + reissue.
+
+- `demo/demo_server_roundtrip.ts`  
+  Runs all three demos in sequence and prints `PASS: server roundtrip evidence`.
 
 ---
 
-## Status
+## Project boundaries
 
-- Receipt semantics: ✅ Frozen and enforced
-- Roundtrip demo: ✅ PASS
-- CI semantic guards: ✅ Active
+Decision Assistant (this repo) is intentionally:
+
+- deterministic
+- local-first
+- “decision infrastructure” for engineering behavior
+
+It is **not**:
+
+- a general LLM agent
+- an auto-refactoring tool
+- a full product analytics platform
+
+If you want a broader governance + economic measurement layer across multiple decision surfaces,
+that belongs in MindForge. Decision Assistant should remain the small, sharp enforcement wedge.
 
 ---
 
-## Philosophy
+## Contributing
 
-> Execution should be easy.
-> Decisions should be expensive.
+See `CONTRIBUTING.md`.
 
-Decision Assistant exists to enforce that difference.
+Key invariants you must not break:
+
+- `assess()` stays **pure** (no fs/git/process/network)
+- `receipt_id` must be random, not derived from plan hash or intent
+- no extra lifecycle states beyond the normative set
+- consumption must be idempotent
+
+---
+
+## License
+
+See `LICENSE`.

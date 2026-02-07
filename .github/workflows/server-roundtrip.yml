@@ -1,0 +1,23 @@
+name: Server Roundtrip Evidence Gate
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  roundtrip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - run: npm ci
+      - run: npm run build
+
+      # Evidence-level check (NOT a test)
+      - name: Server roundtrip evidence
+        run: npx tsx scripts/ci/server_roundtrip_check.ts
