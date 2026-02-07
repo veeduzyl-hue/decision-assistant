@@ -43,3 +43,16 @@ All notable changes to this project will be documented in this file.
 ### Notes
 - Default guardrail thresholds are fixed in v0.2.0 for consistency and reproducibility.
 - Thresholds may become configurable in a future release without breaking the protocol.
+
+## v0.2.1
+
+### Added
+- R3: ai_momentum_override promoted to active FULL-mode rule
+- Latent rule aggregation into REQUIRE_CONFIRM decision path
+
+### Behavior
+- REQUIRE_CONFIRM may now be triggered by non-files_touched signals
+- Receipt validation remains unchanged and backward-compatible
+
+### No breaking changes
+- v0.2.0 receipts remain valid
