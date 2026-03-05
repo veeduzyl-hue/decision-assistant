@@ -1,8 +1,19 @@
 {
   "name": "decision-assistant",
   "version": "0.1.0",
-  "private": true,
+  "description": "Decision guardrail MCP server for AI coding",
   "type": "module",
+
+  "bin": {
+    "decision-assistant": "bin/decision-assistant.mjs"
+  },
+
+  "files": [
+    "dist",
+    "bin",
+    "schemas"
+  ],
+
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
@@ -11,12 +22,15 @@
     "verify:ai_momentum_override": "npm run build && node scripts/verify_ai_momentum_override.js",
     "release:local": "npm run verify:guardrail",
     "test": "vitest",
-    "test:semantics": "vitest tests/receipt_semantics.test.ts"
+    "test:semantics": "vitest tests/receipt_semantics.test.ts",
+    "prepublishOnly": "npm run build"
   },
+
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "zod": "^3.23.8"
   },
+
   "devDependencies": {
     "@types/node": "^20.11.0",
     "tsx": "^4.21.0",

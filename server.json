@@ -1,0 +1,7 @@
+{
+    "name": "decision-assistant",
+    "description": "Decision guardrail MCP server for AI coding risk detection",
+    "runtime": "node",
+    "command": "npx",
+    "args": ["-y", "decision-assistant"]
+  }
