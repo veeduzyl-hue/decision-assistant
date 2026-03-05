@@ -1,13 +1,15 @@
 # Decision Assistant
 
-A Cursor **MCP server** that enforces deterministic **decision guardrails** for risky engineering actions.
-It does not “review” your code. It interrupts execution **at decision time** and emits a verifiable, machine-readable
-**evidence payload** (including a confirmation receipt when required).
+**Stop bad AI coding decisions before they execute.**
 
-- Deterministic rules (no LLM required)
+Decision Assistant is a **deterministic Cursor MCP server** that enforces decision‑time guardrails for risky engineering actions.
+It does not “review” your code after the fact. It **interrupts execution at the moment of commitment** and emits a verifiable,
+machine‑readable **evidence payload** (including a confirmation receipt when required).
+
+- Deterministic rules (**no LLM** in the decision path)
 - Guardrail modes: `ALLOW` / `REQUIRE_CONFIRM` / `BLOCK`
-- Receipt semantics: **random receipt_id**, **plan-bound plan_hash**, **idempotent consumption**
-- Designed for “solo dev sanity” and CI-grade evidence
+- Receipt semantics: **random `receipt_id`**, **plan‑bound `plan_hash`**, **idempotent consumption**
+- Designed for “solo dev sanity” and CI‑grade evidence
 
 ---
 
@@ -34,7 +36,7 @@ In `REQUIRE_CONFIRM`, it returns a **receipt**:
 }
 ```
 
-The user must re-run with:
+To proceed, re-run with:
 
 - `confirm.mode = "EXECUTE"`
 - `confirm.receipt_id` (must be reused)
@@ -44,7 +46,79 @@ If the plan changed, the EXECUTE is rejected and a **new receipt** is issued.
 
 ---
 
-## Install
+## Quick start with Cursor (recommended: `npx` install)
+
+> **Goal:** run the MCP server locally and point Cursor to it **without cloning**.
+
+### 1) Configure Cursor MCP
+
+Add a server entry in Cursor MCP settings (UI varies by Cursor version).
+
+**Recommended config (no absolute repo path):**
+
+```json
+{
+  "mcpServers": {
+    "decision-assistant": {
+      "command": "npx",
+      "args": ["-y", "decision-assistant"]
+    }
+  }
+}
+```
+
+Restart Cursor after saving settings.
+
+> Notes
+> - This requires the package to be published to npm as `decision-assistant`.
+> - If you publish under a scope, change the args to `["@your-scope/decision-assistant"]`.
+
+---
+
+## Local development (repo mode)
+
+Use this when you are actively developing the server.
+
+### 1) Clone + install
+
+```bash
+git clone https://github.com/veeduzyl-hue/decision-assistant
+cd decision-assistant
+npm install
+npm run build
+```
+
+### 2) Configure Cursor MCP (dev)
+
+Point Cursor to your locally built server:
+
+```json
+{
+  "mcpServers": {
+    "decision-assistant-dev": {
+      "command": "node",
+      "args": ["<ABSOLUTE_PATH_TO_REPO>/dist/server.js"]
+    }
+  }
+}
+```
+
+Example (Windows):
+
+```json
+{
+  "mcpServers": {
+    "decision-assistant-dev": {
+      "command": "node",
+      "args": ["D:/AI project/decision-assistant/dist/server.js"]
+    }
+  }
+}
+```
+
+---
+
+## Install / Build
 
 ```bash
 npm install
@@ -68,7 +142,7 @@ Expected: all tests pass.
 This repository includes a deterministic “server roundtrip” evidence demo that proves:
 
 1) `REQUIRE_CONFIRM` issues `receipt_id` + `plan_hash`
-2) `EXECUTE` succeeds only when the receipt matches the plan hash (and reuses receipt_id)
+2) `EXECUTE` succeeds only when the receipt matches the plan hash (and reuses `receipt_id`)
 3) stale confirmations are rejected and re-issued
 
 ### One command
@@ -124,10 +198,7 @@ It is **not**:
 
 - a general LLM agent
 - an auto-refactoring tool
-- a full product analytics platform
-
-If you want a broader governance + economic measurement layer across multiple decision surfaces,
-that belongs in MindForge. Decision Assistant should remain the small, sharp enforcement wedge.
+- a product analytics platform
 
 ---
 
@@ -141,18 +212,6 @@ Key invariants you must not break:
 - `receipt_id` must be random, not derived from plan hash or intent
 - no extra lifecycle states beyond the normative set
 - consumption must be idempotent
-
-### Verifiable Evidence
-
-A read-only server roundtrip demonstration:
-👉 [decision-assistant-roundtrip-demo](https://github.com/veeduzyl-hue/decision-assistant-roundtrip-demo)
-
-This repository contains a deterministic, CI-verifiable demonstration of the
-Decision Assistant server roundtrip:
-
-REQUIRE_CONFIRM → EXECUTE → REJECT
-
-It is intentionally read-only and exists solely as an evidence artifact.
 
 ---
 
