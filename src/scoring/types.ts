@@ -1,4 +1,4 @@
-export type Decision = "SHIP" | "SCOPED_REFACTOR" | "HARD_REFACTOR";
+export type Decision = "ALLOW" | "SCOPED_REFACTOR" | "HARD_REFACTOR";
 
 export interface Signals {
   structure: {

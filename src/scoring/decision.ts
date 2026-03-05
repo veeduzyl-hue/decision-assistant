@@ -2,6 +2,9 @@ import type { Signals, Answers, Decision } from "./types.js";
 import { computeRiskScore } from "./risk_score.js";
 
 export function decide(signals: Signals, answers?: Answers): { decision: Decision; risk_score: number; reasons: string[] } {
+  // NOTE: Use neutral semantics.
+  // - "ALLOW" means no additional friction is required (not a recommendation).
+
   const { score, reasons } = computeRiskScore(signals, answers);
   const evo = signals.evolution;
 
@@ -20,7 +23,7 @@ export function decide(signals: Signals, answers?: Answers): { decision: Decisio
   } else {
     // low score edge case: fear-of-touching overrides to scoped
     if (answers?.fear_of_touching_hotspot) decision = "SCOPED_REFACTOR";
-    else decision = "SHIP";
+    else decision = "ALLOW";
   }
 
   return { decision, risk_score: score, reasons };

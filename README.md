@@ -218,3 +218,26 @@ Key invariants you must not break:
 ## License
 
 See `LICENSE`.
+
+
+## Verification
+
+After restarting Cursor, you should see `decision-assistant (4 tools enabled)` in **Tools & MCP**.
+
+
+## Package Availability
+
+This package is published on npm as `decision-assistant`.
+
+## Troubleshooting
+
+If you run:
+
+```
+npx decision-assistant
+```
+
+and nothing prints, this is **expected behavior**.
+
+`decision-assistant` runs as an MCP stdio server and waits for a client (such as Cursor) to connect. 
+It will not print interactive output when launched directly from the terminal.

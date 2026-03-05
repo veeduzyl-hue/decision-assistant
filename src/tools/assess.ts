@@ -251,13 +251,13 @@ export function assess(input: AssessInput): AssessOutput {
 
   // 3) rule override (type-stable)
   const decision: ReturnType<typeof decide> =
-    rule_hit.hit && decisionRaw.decision === "SHIP"
+    rule_hit.hit && decisionRaw.decision === "ALLOW"
       ? {
           ...decisionRaw,
           decision: ("SCOPED_REFACTOR" as (typeof decisionRaw)["decision"]),
           reasons: [
             ...renderReasons(decisionRaw.reasons),
-            "[rule_override] Refactor Time Blackhole rule hit; override SHIP -> SCOPED_REFACTOR.",
+            "[rule_override] Refactor Time Blackhole rule hit; override ALLOW -> SCOPED_REFACTOR.",
           ],
         }
       : decisionRaw;
