@@ -1,6 +1,6 @@
 {
   "name": "decision-assistant",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Decision guardrail MCP server for AI coding",
   "type": "module",
   "license": "MIT",
