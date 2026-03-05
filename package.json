@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "description": "Decision guardrail MCP server for AI coding",
   "type": "module",
-
+  
+  "license": "MIT",
+  
   "bin": {
     "decision-assistant": "bin/decision-assistant.mjs"
   },
