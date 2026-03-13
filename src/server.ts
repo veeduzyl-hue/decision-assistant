@@ -16,9 +16,10 @@ import type { TriggerSignals } from "./rules/refactor_time_black_hole.js";
 import { LIMITS } from "./config/index.js";
 import { Telemetry } from "./telemetry.js";
 
-// ✅ single source of truth for receipts (server-authoritative)
+
 import {
   issueReceipt,
+  findActiveReceiptByPlanHash,
   getReceiptState,
   consumeReceipt,
   type ReceiptRecord,
@@ -26,14 +27,7 @@ import {
 
 const STATE_FILE = ".decision_assistant/state.json";
 
-/**
- * SDK 1.25.1 的 setRequestHandler 要求：
- * - request schema 必须包含 method 的 z.literal(...)
- * - 并且 request schema 需要挂载 result schema： (schema as any).result = ResultSchema
- *   否则 SDK 在校验 handler 返回值时会读到 undefined，从而报 _zod 错误
- */
 
-// -------------------- Request Schemas (Envelope) --------------------
 const ToolsListRequestSchema = z.object({
   method: z.literal("tools/list"),
   params: z.object({}).optional(),
@@ -45,9 +39,8 @@ const ToolsCallRequestSchema = z.object({
     name: z.string(),
     arguments: z.record(z.unknown()).optional(),
   }),
-});
+})
 
-// -------------------- Result Schemas (Required by SDK 1.25.1) --------------------
 const ToolsListResultSchema = z.object({
   tools: z.array(
     z.object({
@@ -58,8 +51,7 @@ const ToolsListResultSchema = z.object({
   ),
 });
 
-// NOTE: 关键修复：允许 isError（用于 Guardrail 阻断时的“强制对话阻断”）
-const ToolsCallResultSchema = z.object({
+ const ToolsCallResultSchema = z.object({
   isError: z.boolean().optional(),
   content: z.array(
     z.object({
@@ -69,13 +61,11 @@ const ToolsCallResultSchema = z.object({
   ),
 });
 
-// ✅ 关键：绑定 result schema，避免 _zod 报错
 (ToolsListRequestSchema as any).result = ToolsListResultSchema;
 (ToolsCallRequestSchema as any).result = ToolsCallResultSchema;
 
 type ToolCallArgs = Record<string, unknown> | undefined;
 
-// ---- v0.2 security: clamp incoming arguments to reduce ReDoS/DoS risk ----
 function clampText(input: unknown): unknown {
   if (typeof input === "string") {
     return input.length > LIMITS.MAX_TEXT_LENGTH ? input.slice(0, LIMITS.MAX_TEXT_LENGTH) : input;
@@ -89,16 +79,6 @@ function clampText(input: unknown): unknown {
   return input;
 }
 
-/**
- * confirm 入参（行为层）：
- * - 不传：首次调用，拿 receipt
- * - ACK：仅确认收到（不放行）
- * - EXECUTE：带 receipt 签收并放行（需 receipt_id + plan_hash）
- *
- * 兼容旧版：confirm: true/false
- * - true：提示用户改用 receipt 形态（不会放行）
- * - false/undefined：等价于不传
- */
 type ConfirmArg =
   | boolean
   | {
@@ -151,11 +131,8 @@ async function main() {
     version: config.app.version,
   });
 
-  // ✅ Minimal Observability: local-only telemetry (append-only JSONL)
-  // Disable by env: DA_TELEMETRY=0
   const telemetry = new Telemetry();
 
-  // tools/list
   server.setRequestHandler(ToolsListRequestSchema as any, async () => {
     return {
       tools: [
@@ -243,12 +220,10 @@ async function main() {
     };
   });
 
-  // tools/call
-  server.setRequestHandler(ToolsCallRequestSchema as any, async (request: any) => {
+    server.setRequestHandler(ToolsCallRequestSchema as any, async (request: any) => {
     const toolName: string = request.params.name;
     const args: ToolCallArgs = request.params.arguments;
 
-    // ✅ clamp incoming args
     const safeArgs = clampText(args) as ToolCallArgs;
 
     switch (toolName) {
@@ -268,17 +243,18 @@ async function main() {
 
         const confirmNorm = normalizeConfirm((safeArgs as any)?.confirm as ConfirmArg | undefined);
 
-        // --- run assess once (pure) ---
+        
         const out = assess({ config, signals, confirm: confirmNorm as any });
         appendArtifact(STATE_FILE, "decision", out);
 
         const guardrail = (out as any)?.guardrail;
         const action = guardrail?.action;
+        const isExecute = (confirmNorm as any)?.mode === "EXECUTE";
 
         const ruleId =
           (out as any)?.rule_hit?.rule_id ?? (guardrail as any)?.rule_id ?? "unknown_rule";
 
-        // ACK telemetry
+        
         if ((confirmNorm as any)?.mode === "ACK") {
           const rid = (confirmNorm as any)?.receipt_id;
           if (typeof rid === "string") {
@@ -292,10 +268,7 @@ async function main() {
           }
         }
 
-        // -------------------------
-        // BLOCK
-        // -------------------------
-        if (action === "BLOCK") {
+          if (action === "BLOCK") {
           telemetry.recordInterruption({
             rule_id: ruleId,
             decision: "BLOCK",
@@ -309,7 +282,7 @@ async function main() {
               {
                 type: "text",
                 text: [
-                  "⛔ Decision Guardrail: BLOCK",
+                  "�?Decision Guardrail: BLOCK",
                   `Reason: ${guardrail.reason ?? "Risk threshold exceeded."}`,
                   "",
                   "Action blocked. Reduce risk signals and retry.",
@@ -322,16 +295,30 @@ async function main() {
           };
         }
 
-        // -------------------------
-        // REQUIRE_CONFIRM (issue receipt)
-        // -------------------------
+        
         if (action === "REQUIRE_CONFIRM") {
           const receipt = guardrail?.receipt;
-          const receiptId = receipt?.receipt_id;
+          let receiptId = receipt?.receipt_id;
           const planHash = receipt?.plan_hash;
 
-          // ✅ issue receipt to local store (authoritative state)
-          if (typeof receiptId === "string" && typeof planHash === "string") {
+      
+        if (typeof planHash === "string") {
+            const existing = findActiveReceiptByPlanHash(planHash);
+            if (existing) {
+              receiptId = existing.receipt_id;
+              if ((out as any)?.guardrail?.receipt) {
+                (out as any).guardrail.receipt.receipt_id = existing.receipt_id;
+                (out as any).guardrail.receipt.plan_hash = existing.plan_hash;
+                (out as any).guardrail.receipt.scope = existing.scope;
+              }
+            }
+          }
+
+          if (
+            typeof receiptId === "string" &&
+            typeof planHash === "string" &&
+            findActiveReceiptByPlanHash(planHash)?.receipt_id !== receiptId
+          ) {
             const r: ReceiptRecord = {
               receipt_id: receiptId,
               plan_hash: planHash,
@@ -382,33 +369,50 @@ async function main() {
           };
         }
 
-        // -------------------------
-        // ALLOW (must validate/consume receipt if EXECUTE)
-        // -------------------------
         if (action === "ALLOW") {
-          if ((confirmNorm as any)?.mode === "EXECUTE") {
+          if (isExecute) {
             const rid = (confirmNorm as any)?.receipt_id as string;
             const planHash = (confirmNorm as any)?.plan_hash as string;
 
             const st = getReceiptState(rid);
 
-            // distinguish rejection reasons
-            let rejectReason: string | null = null;
-            if (st.status !== "active") {
-              rejectReason = "invalid or replayed receipt";
-            } else if (st.plan_hash !== planHash) {
-              rejectReason = "receipt is stale or plan changed";
-            }
+           
+            if (st.status === "consumed" && st.plan_hash === planHash) {
+              (out as any).guardrail.already_executed = true;
+              (out as any).guardrail.executed = true;
+            } else if (st.status === "active" && st.plan_hash === planHash) {
+             
+              consumeReceipt(rid, planHash);
 
-            if (rejectReason) {
-              // Reject: return REQUIRE_CONFIRM (issue a fresh receipt by re-running assess w/o confirm)
+              telemetry.recordAction({
+                rule_id: ruleId,
+                decision: "REQUIRE_CONFIRM",
+                interruption_id: rid,
+                user_action: "confirmed",
+                signals: signals ?? {},
+              });
+            } else {
+ 
               const out2 = assess({ config, signals, confirm: undefined });
               appendArtifact(STATE_FILE, "decision", out2);
 
               const g2 = (out2 as any)?.guardrail;
               const r2 = g2?.receipt;
 
-              if (g2?.action === "REQUIRE_CONFIRM" && r2?.receipt_id && r2?.plan_hash) {
+              const r2PlanHash = r2?.plan_hash;
+              const r2Reuse = typeof r2PlanHash === "string" ? findActiveReceiptByPlanHash(r2PlanHash) : null;
+              if (r2Reuse && g2?.receipt) {
+                g2.receipt.receipt_id = r2Reuse.receipt_id;
+                g2.receipt.plan_hash = r2Reuse.plan_hash;
+                g2.receipt.scope = r2Reuse.scope;
+              }
+
+              if (
+                g2?.action === "REQUIRE_CONFIRM" &&
+                r2?.receipt_id &&
+                r2?.plan_hash &&
+                (!r2Reuse || r2Reuse.receipt_id !== r2.receipt_id)
+              ) {
                 issueReceipt({
                   receipt_id: r2.receipt_id,
                   plan_hash: r2.plan_hash,
@@ -423,7 +427,7 @@ async function main() {
                     type: "text",
                     text: [
                       "⚠️ Decision Guardrail: REQUIRE_CONFIRM",
-                      `Reason: ${(g2?.reason ?? "High risk detected.") + ` (confirmation rejected: ${rejectReason})`}`,
+                      `Reason: ${(g2?.reason ?? "High risk detected.") + " (confirmation rejected: invalid or replayed receipt)"}`,
                       "",
                       "This action is blocked until you explicitly confirm the latest receipt.",
                       r2?.receipt_id && r2?.plan_hash
@@ -439,17 +443,6 @@ async function main() {
                 ],
               };
             }
-
-            // consume receipt once
-            consumeReceipt(rid, planHash);
-
-            telemetry.recordAction({
-              rule_id: ruleId,
-              decision: "REQUIRE_CONFIRM",
-              interruption_id: rid,
-              user_action: "confirmed",
-              signals: signals ?? {},
-            });
           }
 
           const confirmedPlan = guardrail?.confirmation?.confirmed_plan_hash;
@@ -467,9 +460,6 @@ async function main() {
           };
         }
 
-        // -------------------------
-        // Default pass-through
-        // -------------------------
         return {
           content: [
             {
@@ -502,11 +492,11 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  // stdio 模式下：不要向 stdout 输出任何日志，否则会污染 MCP 协议
-  // 如需排查，仅允许 stderr
-  // logger / console.* 禁止 stdout
+ 
 }
 
 main().catch((_err) => {
   process.exit(1);
 });
+
+

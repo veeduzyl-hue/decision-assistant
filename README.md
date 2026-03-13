@@ -42,7 +42,11 @@ To proceed, re-run with:
 - `confirm.receipt_id` (must be reused)
 - `confirm.plan_hash` (must match current plan hash)
 
-If the plan changed, the EXECUTE is rejected and a **new receipt** is issued.
+If the plan changed, EXECUTE is rejected with `confirmation.rejected = true` and
+`error = STALE_RECEIPT_OR_PLAN_CHANGED` under `REQUIRE_CONFIRM`.
+If an active receipt already exists for the same `plan_hash`, the server may reuse
+that receipt instead of issuing a new one.
+Repeated EXECUTE with the same consumed receipt is idempotent and remains `ALLOW`.
 
 ---
 

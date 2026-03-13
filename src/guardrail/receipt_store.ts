@@ -140,3 +140,20 @@ export function getReceiptState(receipt_id: string): ReceiptState {
   if (s.status === "active") return { status: "active", plan_hash: s.plan_hash, scope: s.scope };
   return { status: "consumed", plan_hash: s.plan_hash, scope: s.scope };
 }
+
+/**
+ * Find one active receipt for the same computed plan_hash.
+ * Used to avoid issuing duplicate active receipts for identical plans.
+ */
+export function findActiveReceiptByPlanHash(
+  plan_hash: string
+): { receipt_id: string; plan_hash: string; scope: ReceiptScope } | null {
+  if (!plan_hash) return null;
+
+  for (const [receipt_id, state] of receiptState.entries()) {
+    if (state.status === "active" && state.plan_hash === plan_hash) {
+      return { receipt_id, plan_hash: state.plan_hash, scope: state.scope };
+    }
+  }
+  return null;
+}

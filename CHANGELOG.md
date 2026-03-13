@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.3.1-rc - 2026-03-13
+
+### Fixed
+- Receipt EXECUTE replay is now idempotent (`ALLOW` with `already_executed=true`).
+- Receipt lifecycle now reuses an existing active receipt for the same `plan_hash`
+  instead of issuing duplicate active receipts.
+
+### Behavior
+- `plan_hash` mismatch during EXECUTE remains a confirmation rejection path:
+  `guardrail.action = REQUIRE_CONFIRM` with
+  `confirmation.rejected = true` and `error = STALE_RECEIPT_OR_PLAN_CHANGED`.
+
+### Release Engineering
+- Updated local guardrail verification flow to validate receipt confirmation in a
+  single server session (stateful lifecycle check).
+
 ## [0.1.0] - 2026-01-04
 
 ### Added

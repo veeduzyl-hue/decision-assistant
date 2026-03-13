@@ -93,8 +93,13 @@ export function evaluate(signals: DecisionSignal[], config: AppConfig): PolicyDe
 
   /**
    * FULL mode:
-   * - BLOCK can short-circuit.
+   * - BLOCK can short-circuit (extreme safety valve only).
    * - WARN must NOT short-circuit (so latent rules can append evidence).
+   *
+   * IMPORTANT SEMANTICS:
+   * - `config.guardrail.files_touched.block` is treated as a *confirmation threshold* (REQUIRE_CONFIRM window),
+   *   NOT as a hard-stop. Hard-stop is reserved for extreme inputs only.
+   * - This preserves a usable receipt window in demo + real use, while keeping an extreme safety valve.
    */
   let baseAction: PolicyDecision["action"] = "ALLOW";
   let baseReason = "";
@@ -103,12 +108,20 @@ export function evaluate(signals: DecisionSignal[], config: AppConfig): PolicyDe
   const filesTouched =
     (signals.find((s) => s.kind === "files_touched")?.value as number | undefined) ?? 0;
 
+  const diffLines =
+    (signals.find((s) => s.kind === "diff_lines_total")?.value as number | undefined) ?? 0;
+
   const { warn, block } = config.guardrail.files_touched;
 
-  if (filesTouched >= block) {
+  // Extreme safety valve (true hard stop). Keeps semantics: BLOCK => no receipt.
+  // Chosen to be high enough that normal large refactors fall into REQUIRE_CONFIRM instead of BLOCK.
+  const EXTREME_FILES_TOUCHED = Math.max(block * 2, 32);
+  const EXTREME_DIFF_LINES = 5000;
+
+  if (filesTouched >= EXTREME_FILES_TOUCHED || diffLines >= EXTREME_DIFF_LINES) {
     return {
       action: "BLOCK",
-      reason: `Refactor risk exceeded hard threshold (files_touched=${filesTouched}).`,
+      reason: `Refactor risk exceeded extreme threshold (files_touched=${filesTouched}, diff_lines_total=${diffLines}).`,
       suggestedExits: [...BLOCK_EXITS],
     };
   }
@@ -117,6 +130,13 @@ export function evaluate(signals: DecisionSignal[], config: AppConfig): PolicyDe
   if (filesTouched >= warn) {
     baseAction = "WARN";
     baseReason = `Warning threshold exceeded: this change touches ${filesTouched} files (>= ${warn}).`;
+    suggestedExits = [...WARN_EXITS];
+  }
+
+  // Confirmation threshold window (still WARN; guardrail will map WARN -> REQUIRE_CONFIRM).
+  if (filesTouched >= block) {
+    baseAction = "WARN";
+    baseReason = `Confirmation threshold exceeded: this change touches ${filesTouched} files (>= ${block}).`;
     suggestedExits = [...WARN_EXITS];
   }
 
