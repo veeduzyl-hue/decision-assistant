@@ -1,4 +1,4 @@
-import { assess } from "../src/tools/assess.js";
+import { assess } from "../src/modules/assess/assess.js";
 import { loadConfig } from "../src/config/loadConfig.js";
 import {
   printHeader,
@@ -38,6 +38,7 @@ for (const ft of CANDIDATES) {
       signals: candidateSignals,
       receipt_id: s.receipt_id,
       plan_hash: s.plan_hash,
+      nonce: s.nonce,
     });
 
     evidenceFile = writeEvidence("1_require_confirm", {
@@ -74,14 +75,14 @@ printJson("policy_hint", {
 printJson("summary", s);
 printJson("full_decision_payload", out);
 
-if (!s.receipt_id || !s.plan_hash) {
-  console.error("\n[demo] Missing receipt_id/plan_hash in guardrail.receipt.");
+if (!s.receipt_id || !s.plan_hash || !s.nonce) {
+  console.error("\n[demo] Missing receipt_id/plan_hash/nonce in guardrail.receipt.");
   process.exit(2);
 }
 
-console.log("\n[demo] PASS: REQUIRE_CONFIRM issued; receipt_id+plan_hash present.");
+console.log("\n[demo] PASS: REQUIRE_CONFIRM issued; receipt_id+plan_hash+nonce present.");
 console.log(
   "\n# Next step:\n" +
-    `npx tsx demo/demo_execute.ts --receipt_id ${s.receipt_id} --plan_hash ${s.plan_hash}\n` +
-    `npx tsx demo/demo_reject.ts  --receipt_id ${s.receipt_id} --plan_hash ${s.plan_hash}\n`
+    `npx tsx demo/demo_execute.ts --receipt_id ${s.receipt_id} --plan_hash ${s.plan_hash} --nonce ${s.nonce}\n` +
+    `npx tsx demo/demo_reject.ts  --receipt_id ${s.receipt_id} --plan_hash ${s.plan_hash} --nonce ${s.nonce}\n`
 );

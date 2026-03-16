@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { defaultConfig } from "../dist/config/defaults.js";
-import { evaluateAiMomentumOverride } from "../dist/rules/r3_ai_momentum_override.js";
+import { evaluateAiMomentumOverride } from "../dist/modules/risk/r3_ai_momentum_override.js";
 
 function expectHit(label, signals) {
   const out = evaluateAiMomentumOverride(defaultConfig, signals);

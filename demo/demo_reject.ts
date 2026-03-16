@@ -1,4 +1,4 @@
-import { assess } from "../src/tools/assess.js";
+import { assess } from "../src/modules/assess/assess.js";
 import { loadConfig } from "../src/config/loadConfig.js";
 import { printHeader, printJson, summarize, getArg, readLastRun, writeEvidence } from "./_demo_common.js";
 
@@ -8,14 +8,16 @@ const config = loadConfig();
 
 const argReceiptId = getArg("--receipt_id");
 const argPlanHash = getArg("--plan_hash");
+const argNonce = getArg("--nonce");
 
 const last = readLastRun();
 const receipt_id = argReceiptId ?? last?.receipt_id;
 const plan_hash = argPlanHash ?? last?.plan_hash;
+const nonce = argNonce ?? last?.nonce;
 const baseSignals = last?.signals;
 
-if (!receipt_id || !plan_hash || !baseSignals) {
-  console.error("[demo] Missing receipt_id/plan_hash/signals. Run demo_require_confirm.ts first.");
+if (!receipt_id || !plan_hash || !nonce || !baseSignals) {
+  console.error("[demo] Missing receipt_id/plan_hash/nonce/signals. Run demo_require_confirm.ts first.");
   process.exit(2);
 }
 
@@ -29,7 +31,7 @@ const mutatedSignals = {
 const out = assess({
   config,
   signals: mutatedSignals,
-  confirm: { mode: "EXECUTE", receipt_id, plan_hash }, // stale plan_hash on purpose
+  confirm: { mode: "EXECUTE", receipt_id, plan_hash, nonce }, // stale plan_hash on purpose
 } as any);
 
 const s = summarize(out);
@@ -55,7 +57,7 @@ writeEvidence("3_reject", {
   version: "v0.3d",
   step: "reject_stale",
   ts: new Date().toISOString(),
-  provided: { receipt_id, plan_hash },
+  provided: { receipt_id, plan_hash, nonce },
   summary: s,
   full_decision_payload: out,
 });

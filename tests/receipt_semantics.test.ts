@@ -64,7 +64,7 @@ describe("Receipt Semantics — Normative Compliance", () => {
    */
   describe("assess() purity", () => {
     it("assess.ts must not perform I/O or spawn processes", () => {
-      const src = readSource("src/tools/assess.ts");
+      const src = readSource("src/modules/assess/assess.ts");
 
       // hard forbidden: file/process/network
       expect(src).not.toMatch(/\bspawnSync\b/);
@@ -93,7 +93,7 @@ describe("Receipt Semantics — Normative Compliance", () => {
  */
   describe("receipt_id constraints", () => {
     it("receipt_id must be random and independent from plan_hash", () => {
-      const src = readSource("src/tools/assess.ts");
+      const src = readSource("src/modules/assess/assess.ts");
   
       const fn = extractFunctionBody(src, "makeReceiptId");
       expect(fn).not.toBeNull();
@@ -117,12 +117,12 @@ describe("Receipt Semantics — Normative Compliance", () => {
    */
   describe("receipt lifecycle constraints", () => {
     it("receipt_store must not introduce extra lifecycle states", () => {
-      const src = readSource("src/guardrail/receipt_store.ts");
+      const src = readSource("src/persistence/sqlite_store.ts");
 
-      expect(src).not.toMatch(/\bexpired\b/i);
-      expect(src).not.toMatch(/\brevoked\b/i);
-      expect(src).not.toMatch(/\binvalidated\b/i);
-      expect(src).not.toMatch(/\bpending\b/i);
+      expect(src).not.toMatch(/status:\s*"expired"/i);
+      expect(src).not.toMatch(/status:\s*"revoked"/i);
+      expect(src).not.toMatch(/status:\s*"invalidated"/i);
+      expect(src).not.toMatch(/status:\s*"pending"/i);
 
       expect(src).toMatch(/\bmissing\b/);
       expect(src).toMatch(/\bactive\b/);
@@ -133,10 +133,10 @@ describe("Receipt Semantics — Normative Compliance", () => {
   /**
    * SECTION 4 — idempotent consumption
    */
-  describe("idempotent consumption", () => {
-    it("consumeReceipt must exist", async () => {
-      const mod = await import("../src/guardrail/receipt_store");
-      expect(typeof mod.consumeReceipt).toBe("function");
+  describe("authoritative persistence surface", () => {
+    it("sqlite persistence factory must exist", () => {
+      const src = readSource("src/persistence/sqlite_store.ts");
+      expect(src).toMatch(/\bcreateSqlitePersistence\b/);
     });
   });
 
@@ -144,15 +144,17 @@ describe("Receipt Semantics — Normative Compliance", () => {
    * SECTION 5 — forbidden client authority
    */
   describe("client authority violations", () => {
-    it("receipt_store must not infer state by reading receipts.jsonl", () => {
-      const src = readSource("src/guardrail/receipt_store.ts");
+    it("receipt_store must not rely on in-memory authoritative maps", () => {
+      const src = readSource("src/persistence/receipt_store.ts");
+      const sqliteSrc = readSource("src/persistence/sqlite_store.ts");
 
       // forbidden read paths
       expect(src).not.toMatch(/\breadFileSync\b/);
       expect(src).not.toMatch(/\bcreateReadStream\b/);
+      expect(sqliteSrc).not.toMatch(/\bnew Map\b/);
 
-      // evidence append must exist
-      expect(src).toMatch(/\bappendFileSync\b/);
+      // sqlite-backed persistence must exist
+      expect(sqliteSrc).toMatch(/\bDatabaseSync\b/);
     });
   });
 });

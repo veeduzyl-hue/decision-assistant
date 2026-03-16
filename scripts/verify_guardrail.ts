@@ -134,6 +134,7 @@ async function main() {
     assert(r1, "PASS1: guardrail.receipt must exist");
     assert(typeof r1.receipt_id === "string" && r1.receipt_id.startsWith("gr_"), "PASS1: receipt_id must start with gr_");
     assert(typeof r1.plan_hash === "string" && r1.plan_hash.startsWith("plan_"), "PASS1: plan_hash must start with plan_");
+    assert(typeof r1.nonce === "string" && r1.nonce.startsWith("nonce_"), "PASS1: nonce must start with nonce_");
     assert.equal(r1.scope, "this_call_only", "PASS1: receipt.scope must be this_call_only");
 
     const pass2 = await session.call({
@@ -148,6 +149,7 @@ async function main() {
             mode: "EXECUTE",
             receipt_id: r1.receipt_id,
             plan_hash: r1.plan_hash,
+            nonce: r1.nonce,
           },
         },
       },
@@ -170,8 +172,9 @@ async function main() {
     assert.equal(c2.confirmed, true, "PASS2: confirmation.confirmed must be true");
     assert.equal(c2.confirmed_plan_hash, r1.plan_hash, "PASS2: confirmed_plan_hash must match");
     assert.equal(c2.confirmed_receipt_id, r1.receipt_id, "PASS2: confirmed_receipt_id must match");
+    assert.equal(c2.confirmed_nonce, r1.nonce, "PASS2: confirmed_nonce must match");
 
-    // PASS 3: idempotent replay should still ALLOW and keep same receipt.
+    // PASS 3: replay should be rejected and mint a fresh receipt.
     const pass3 = await session.call({
       jsonrpc: "2.0",
       id: 3,
@@ -184,6 +187,7 @@ async function main() {
             mode: "EXECUTE",
             receipt_id: r1.receipt_id,
             plan_hash: r1.plan_hash,
+            nonce: r1.nonce,
           },
         },
       },
@@ -191,10 +195,12 @@ async function main() {
     const pass3Payload = extractDecisionPayloadFromText(toolText(pass3));
     const g3 = pass3Payload?.guardrail;
     assert(g3, "PASS3: guardrail must exist");
-    assert.equal(g3.action, "ALLOW", "PASS3: replay guardrail.action must be ALLOW");
-    assert.equal(g3.executed, true, "PASS3: replay guardrail.executed must be true");
-    assert.equal(g3.already_executed, true, "PASS3: replay guardrail.already_executed must be true");
-    assert.equal(g3?.receipt?.receipt_id, r1.receipt_id, "PASS3: replay receipt_id must remain stable");
+    assert.equal(g3.action, "REQUIRE_CONFIRM", "PASS3: replay guardrail.action must be REQUIRE_CONFIRM");
+    assert.equal(g3.executed, false, "PASS3: replay guardrail.executed must be false");
+    assert.equal(g3.confirmation?.rejected, true, "PASS3: replay must mark confirmation.rejected");
+    assert.equal(g3.confirmation?.error, "REPLAY_DETECTED", "PASS3: replay must surface REPLAY_DETECTED");
+    assert.notEqual(g3?.receipt?.receipt_id, r1.receipt_id, "PASS3: replay must mint a fresh receipt");
+    assert.notEqual(g3?.receipt?.nonce, r1.nonce, "PASS3: replay must mint a fresh nonce");
 
     console.log("[smoke:guardrail] OK");
   } finally {

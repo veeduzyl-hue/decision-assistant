@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://decision-assistant.local/config/schema/receipt.schema.json",
+  "title": "Decision Assistant Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "decision_id",
+    "policy_version",
+    "engine_version",
+    "receipt_id",
+    "plan_hash",
+    "nonce",
+    "scope",
+    "status",
+    "issued_at",
+    "expires_at",
+    "consumed_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "decision-assistant/receipt/v1"
+    },
+    "decision_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "policy_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "engine_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "receipt_id": {
+      "type": "string",
+      "pattern": "^gr_[a-f0-9]{12,}$"
+    },
+    "plan_hash": {
+      "type": "string",
+      "pattern": "^plan_[a-f0-9]{12,}$"
+    },
+    "nonce": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scope": {
+      "enum": [
+        "this_call_only"
+      ]
+    },
+    "status": {
+      "enum": [
+        "active",
+        "consumed"
+      ]
+    },
+    "issued_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+    },
+    "expires_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+    },
+    "consumed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "active"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "consumed_at": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "consumed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "consumed_at": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+          }
+        }
+      }
+    }
+  ]
+}

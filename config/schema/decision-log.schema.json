@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://decision-assistant.local/config/schema/decision-log.schema.json",
+  "title": "Decision Assistant Decision Log Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "decision_id",
+    "ts",
+    "event_type",
+    "action",
+    "verdict",
+    "policy_version",
+    "engine_version",
+    "reason_codes"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "decision-assistant/decision-log/v1"
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ts": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+    },
+    "event_type": {
+      "enum": [
+        "decision.assessed",
+        "receipt.issued",
+        "receipt.reused",
+        "execute.accepted",
+        "execute.rejected",
+        "receipt.consumed"
+      ]
+    },
+    "action": {
+      "enum": [
+        "ASSESS",
+        "EXECUTE"
+      ]
+    },
+    "verdict": {
+      "enum": [
+        "WARN",
+        "REQUIRE_CONFIRM",
+        "BLOCK",
+        "EXECUTE_ACCEPTED",
+        "EXECUTE_REJECTED"
+      ]
+    },
+    "policy_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "engine_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "receipt_id": {
+      "type": "string",
+      "pattern": "^gr_[a-f0-9]{12,}$"
+    },
+    "plan_hash": {
+      "type": "string",
+      "pattern": "^plan_[a-f0-9]{12,}$"
+    },
+    "nonce": {
+      "type": "string",
+      "minLength": 1
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "enum": [
+              "receipt.issued",
+              "receipt.reused",
+              "execute.accepted",
+              "execute.rejected",
+              "receipt.consumed"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "receipt_id",
+          "plan_hash"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "enum": [
+              "execute.accepted",
+              "execute.rejected",
+              "receipt.consumed"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "nonce"
+        ]
+      }
+    }
+  ]
+}

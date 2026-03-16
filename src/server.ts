@@ -1,32 +1,25 @@
-import { logger } from "./utils/logger.js";
-import { loadConfig } from "./config/loadConfig.js";
-import { appendArtifact } from "./storage/state.js";
-
-import { detectTriggers } from "./tools/detect_triggers.js";
-import { assess } from "./tools/assess.js";
-import { plan } from "./tools/plan.js";
-import { followup } from "./tools/followup.js";
-
-import { createMcpServer } from "./infra/mcp_server.js";
+import { randomUUID } from "node:crypto";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-
 import { z } from "zod";
-import type { TriggerSignals } from "./rules/refactor_time_black_hole.js";
 
+import { appendArtifact } from "./audit/artifacts.js";
 import { LIMITS } from "./config/index.js";
+import { loadConfig } from "./config/loadConfig.js";
+import { assess } from "./modules/assess/assess.js";
+import type { TriggerSignals } from "./modules/risk/refactor_time_black_hole.js";
+import {
+  buildExecutionKey,
+  createSqlitePersistence,
+  type ConsumeReceiptError,
+  type DecisionLogEvent,
+} from "./persistence/receipt_store.js";
+import { createMcpServer } from "./runtime/mcp_server.js";
+import { detectTriggers } from "./runtime/tools/detect_triggers.js";
+import { followup } from "./runtime/tools/followup.js";
+import { plan } from "./runtime/tools/plan.js";
 import { Telemetry } from "./telemetry.js";
 
-
-import {
-  issueReceipt,
-  findActiveReceiptByPlanHash,
-  getReceiptState,
-  consumeReceipt,
-  type ReceiptRecord,
-} from "./guardrail/receipt_store.js";
-
 const STATE_FILE = ".decision_assistant/state.json";
-
 
 const ToolsListRequestSchema = z.object({
   method: z.literal("tools/list"),
@@ -39,7 +32,7 @@ const ToolsCallRequestSchema = z.object({
     name: z.string(),
     arguments: z.record(z.unknown()).optional(),
   }),
-})
+});
 
 const ToolsListResultSchema = z.object({
   tools: z.array(
@@ -51,7 +44,7 @@ const ToolsListResultSchema = z.object({
   ),
 });
 
- const ToolsCallResultSchema = z.object({
+const ToolsCallResultSchema = z.object({
   isError: z.boolean().optional(),
   content: z.array(
     z.object({
@@ -66,6 +59,15 @@ const ToolsListResultSchema = z.object({
 
 type ToolCallArgs = Record<string, unknown> | undefined;
 
+type ConfirmArg =
+  | boolean
+  | {
+      mode?: unknown;
+      receipt_id?: unknown;
+      plan_hash?: unknown;
+      nonce?: unknown;
+    };
+
 function clampText(input: unknown): unknown {
   if (typeof input === "string") {
     return input.length > LIMITS.MAX_TEXT_LENGTH ? input.slice(0, LIMITS.MAX_TEXT_LENGTH) : input;
@@ -79,20 +81,12 @@ function clampText(input: unknown): unknown {
   return input;
 }
 
-type ConfirmArg =
-  | boolean
-  | {
-      mode?: unknown;
-      receipt_id?: unknown;
-      plan_hash?: unknown;
-    };
-
 function normalizeConfirm(
   confirmRaw: ConfirmArg | undefined
 ):
   | undefined
   | { mode: "ACK"; receipt_id?: string; plan_hash?: string }
-  | { mode: "EXECUTE"; receipt_id: string; plan_hash: string }
+  | { mode: "EXECUTE"; receipt_id: string; plan_hash: string; nonce: string }
   | { mode: "INVALID_LEGACY_TRUE" } {
   if (confirmRaw === undefined) return undefined;
 
@@ -104,6 +98,7 @@ function normalizeConfirm(
   const mode = String((confirmRaw as any)?.mode ?? "");
   const receipt_id = (confirmRaw as any)?.receipt_id;
   const plan_hash = (confirmRaw as any)?.plan_hash;
+  const nonce = (confirmRaw as any)?.nonce;
 
   if (mode === "ACK") {
     return {
@@ -114,8 +109,12 @@ function normalizeConfirm(
   }
 
   if (mode === "EXECUTE") {
-    if (typeof receipt_id === "string" && typeof plan_hash === "string") {
-      return { mode: "EXECUTE", receipt_id, plan_hash };
+    if (
+      typeof receipt_id === "string" &&
+      typeof plan_hash === "string" &&
+      typeof nonce === "string"
+    ) {
+      return { mode: "EXECUTE", receipt_id, plan_hash, nonce };
     }
     return { mode: "INVALID_LEGACY_TRUE" };
   }
@@ -123,8 +122,57 @@ function normalizeConfirm(
   return { mode: "INVALID_LEGACY_TRUE" };
 }
 
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function addMinutes(iso: string, minutes: number): string {
+  return new Date(Date.parse(iso) + minutes * 60 * 1000).toISOString();
+}
+
+function makeDecisionId(): string {
+  return `dec_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+}
+
+function makeEventId(): string {
+  return `evt_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+}
+
+function reasonCodesFor(ruleId: string, action: unknown): string[] {
+  const codes = [ruleId];
+  if (typeof action === "string") codes.push(action);
+  return codes.filter(Boolean);
+}
+
+function toConfirmationError(error: ConsumeReceiptError):
+  | "MISSING_RECEIPT"
+  | "RECEIPT_CONSUMED"
+  | "NONCE_MISMATCH"
+  | "REPLAY_DETECTED"
+  | "RECEIPT_EXPIRED"
+  | "PLAN_HASH_MISMATCH"
+  | "INVALID_RECEIPT" {
+  switch (error) {
+    case "MISSING_RECEIPT":
+      return "MISSING_RECEIPT";
+    case "RECEIPT_CONSUMED":
+      return "RECEIPT_CONSUMED";
+    case "NONCE_MISMATCH":
+      return "NONCE_MISMATCH";
+    case "REPLAY_DETECTED":
+      return "REPLAY_DETECTED";
+    case "RECEIPT_EXPIRED":
+      return "RECEIPT_EXPIRED";
+    case "PLAN_HASH_MISMATCH":
+      return "PLAN_HASH_MISMATCH";
+    default:
+      return "INVALID_RECEIPT";
+  }
+}
+
 async function main() {
   const config = loadConfig();
+  const persistence = createSqlitePersistence();
 
   const server = createMcpServer({
     name: config.app.name,
@@ -132,6 +180,16 @@ async function main() {
   });
 
   const telemetry = new Telemetry();
+
+  const appendDecisionEvent = (
+    event: Omit<DecisionLogEvent, "event_id" | "schema_version">
+  ): void => {
+    persistence.decisionLogs.append({
+      event_id: makeEventId(),
+      schema_version: "decision-assistant/decision-log/v1",
+      ...event,
+    });
+  };
 
   server.setRequestHandler(ToolsListRequestSchema as any, async () => {
     return {
@@ -153,7 +211,7 @@ async function main() {
                   files_touched: { type: "number" },
                   diff_lines_total: { type: "number" },
                   touches_package_json: { type: "boolean" },
-                  touches_lockfile: { type: "boolean" },
+                  touches_lockfile: { type: "boolean" }
                 },
               },
             },
@@ -176,19 +234,20 @@ async function main() {
                   files_touched: { type: "number" },
                   diff_lines_total: { type: "number" },
                   touches_package_json: { type: "boolean" },
-                  touches_lockfile: { type: "boolean" },
+                  touches_lockfile: { type: "boolean" }
                 },
               },
               confirm: {
                 type: "object",
                 description:
-                  "Guardrail receipt confirmation. Use mode=EXECUTE with receipt_id and plan_hash returned by REQUIRE_CONFIRM.",
+                  "Guardrail receipt confirmation. Use mode=EXECUTE with receipt_id, plan_hash, and nonce returned by REQUIRE_CONFIRM.",
                 properties: {
                   mode: { type: "string", enum: ["ACK", "EXECUTE"] },
                   receipt_id: { type: "string" },
                   plan_hash: { type: "string" },
+                  nonce: { type: "string" },
                 },
-                required: ["mode", "receipt_id", "plan_hash"],
+                required: ["mode", "receipt_id", "plan_hash", "nonce"],
               },
             },
             required: ["signals"],
@@ -220,10 +279,9 @@ async function main() {
     };
   });
 
-    server.setRequestHandler(ToolsCallRequestSchema as any, async (request: any) => {
+  server.setRequestHandler(ToolsCallRequestSchema as any, async (request: any) => {
     const toolName: string = request.params.name;
     const args: ToolCallArgs = request.params.arguments;
-
     const safeArgs = clampText(args) as ToolCallArgs;
 
     switch (toolName) {
@@ -232,29 +290,47 @@ async function main() {
           signals: (safeArgs as any)?.signals as TriggerSignals | undefined,
         });
         appendArtifact(STATE_FILE, "signal", out);
-        return {
-          content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
-        };
+        return { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] };
       }
 
       case "assess": {
         const signals = (safeArgs as any)?.signals as TriggerSignals | undefined;
         if (!signals) throw new Error("signals parameter is required");
 
+        const requestTs = nowIso();
+        const decisionId = makeDecisionId();
         const confirmNorm = normalizeConfirm((safeArgs as any)?.confirm as ConfirmArg | undefined);
+        const isExecute = (confirmNorm as any)?.mode === "EXECUTE";
 
-        
         const out = assess({ config, signals, confirm: confirmNorm as any });
         appendArtifact(STATE_FILE, "decision", out);
 
         const guardrail = (out as any)?.guardrail;
         const action = guardrail?.action;
-        const isExecute = (confirmNorm as any)?.mode === "EXECUTE";
-
         const ruleId =
           (out as any)?.rule_hit?.rule_id ?? (guardrail as any)?.rule_id ?? "unknown_rule";
+        const baseReasonCodes = reasonCodesFor(ruleId, action);
 
-        
+        appendDecisionEvent({
+          decision_id: decisionId,
+          ts: requestTs,
+          event_type: "decision.assessed",
+          action: isExecute ? "EXECUTE" : "ASSESS",
+          verdict:
+            action === "ALLOW" && isExecute
+              ? "EXECUTE_ACCEPTED"
+              : action === "BLOCK"
+                ? "BLOCK"
+                : "REQUIRE_CONFIRM",
+          policy_version: config.app.version,
+          engine_version: config.app.version,
+          reason_codes: baseReasonCodes,
+          receipt_id: guardrail?.receipt?.receipt_id,
+          plan_hash: guardrail?.receipt?.plan_hash,
+          nonce: guardrail?.receipt?.nonce ?? (confirmNorm as any)?.nonce,
+          message: guardrail?.reason,
+        });
+
         if ((confirmNorm as any)?.mode === "ACK") {
           const rid = (confirmNorm as any)?.receipt_id;
           if (typeof rid === "string") {
@@ -268,7 +344,7 @@ async function main() {
           }
         }
 
-          if (action === "BLOCK") {
+        if (action === "BLOCK") {
           telemetry.recordInterruption({
             rule_id: ruleId,
             decision: "BLOCK",
@@ -282,7 +358,7 @@ async function main() {
               {
                 type: "text",
                 text: [
-                  "�?Decision Guardrail: BLOCK",
+                  "Decision Guardrail: BLOCK",
                   `Reason: ${guardrail.reason ?? "Risk threshold exceeded."}`,
                   "",
                   "Action blocked. Reduce risk signals and retry.",
@@ -295,36 +371,69 @@ async function main() {
           };
         }
 
-        
         if (action === "REQUIRE_CONFIRM") {
           const receipt = guardrail?.receipt;
           let receiptId = receipt?.receipt_id;
           const planHash = receipt?.plan_hash;
+          let nonce = receipt?.nonce;
 
-      
-        if (typeof planHash === "string") {
-            const existing = findActiveReceiptByPlanHash(planHash);
-            if (existing) {
-              receiptId = existing.receipt_id;
-              if ((out as any)?.guardrail?.receipt) {
-                (out as any).guardrail.receipt.receipt_id = existing.receipt_id;
-                (out as any).guardrail.receipt.plan_hash = existing.plan_hash;
-                (out as any).guardrail.receipt.scope = existing.scope;
-              }
-            }
+          const activeReceipt =
+            typeof planHash === "string"
+              ? persistence.receipts.findActiveReceiptByPlanHash(planHash, requestTs)
+              : null;
+
+          if (activeReceipt && (out as any)?.guardrail?.receipt) {
+            receiptId = activeReceipt.receipt_id;
+            nonce = activeReceipt.nonce;
+            (out as any).guardrail.receipt.receipt_id = activeReceipt.receipt_id;
+            (out as any).guardrail.receipt.plan_hash = activeReceipt.plan_hash;
+            (out as any).guardrail.receipt.nonce = activeReceipt.nonce;
+            (out as any).guardrail.receipt.scope = activeReceipt.scope;
           }
 
           if (
             typeof receiptId === "string" &&
             typeof planHash === "string" &&
-            findActiveReceiptByPlanHash(planHash)?.receipt_id !== receiptId
+            typeof nonce === "string" &&
+            (!activeReceipt || activeReceipt.receipt_id !== receiptId)
           ) {
-            const r: ReceiptRecord = {
+            persistence.receipts.issueReceipt({
               receipt_id: receiptId,
               plan_hash: planHash,
+              nonce,
               scope: "this_call_only",
-            };
-            issueReceipt(r);
+              issued_at: requestTs,
+              expires_at: addMinutes(requestTs, 5),
+            });
+            appendDecisionEvent({
+              decision_id: decisionId,
+              ts: requestTs,
+              event_type: "receipt.issued",
+              action: "ASSESS",
+              verdict: "REQUIRE_CONFIRM",
+              policy_version: config.app.version,
+              engine_version: config.app.version,
+              reason_codes: baseReasonCodes,
+              receipt_id: receiptId,
+              plan_hash: planHash,
+              nonce,
+              message: "Receipt issued for guarded execution.",
+            });
+          } else if (activeReceipt) {
+            appendDecisionEvent({
+              decision_id: decisionId,
+              ts: requestTs,
+              event_type: "receipt.reused",
+              action: "ASSESS",
+              verdict: "REQUIRE_CONFIRM",
+              policy_version: config.app.version,
+              engine_version: config.app.version,
+              reason_codes: baseReasonCodes,
+              receipt_id: activeReceipt.receipt_id,
+              plan_hash: activeReceipt.plan_hash,
+              nonce: activeReceipt.nonce,
+              message: "Active receipt reused for identical plan hash.",
+            });
           }
 
           telemetry.recordInterruption({
@@ -336,10 +445,9 @@ async function main() {
           });
 
           const legacyTrue = (confirmNorm as any)?.mode === "INVALID_LEGACY_TRUE";
-
           const rerunHint =
-            receiptId && planHash
-              ? `{ signals: ..., confirm: { mode: "EXECUTE", receipt_id: "${receiptId}", plan_hash: "${planHash}" } }`
+            receiptId && planHash && nonce
+              ? `{ signals: ..., confirm: { mode: "EXECUTE", receipt_id: "${receiptId}", plan_hash: "${planHash}", nonce: "${nonce}" } }`
               : `{ signals: ... }  // (missing receipt: ensure assess attaches guardrail.receipt)`;
 
           return {
@@ -348,12 +456,12 @@ async function main() {
               {
                 type: "text",
                 text: [
-                  "⚠️ Decision Guardrail: REQUIRE_CONFIRM",
+                  "Decision Guardrail: REQUIRE_CONFIRM",
                   `Reason: ${guardrail.reason ?? "High risk detected."}`,
                   "",
                   "This action is blocked until you explicitly confirm the latest receipt.",
                   legacyTrue
-                    ? "Note: legacy confirm:true is no longer accepted. Please confirm with receipt_id + plan_hash."
+                    ? "Note: legacy confirm:true is no longer accepted. Please confirm with receipt_id + plan_hash + nonce."
                     : "",
                   `Re-run the tool with: ${rerunHint}`,
                   "",
@@ -373,37 +481,45 @@ async function main() {
           if (isExecute) {
             const rid = (confirmNorm as any)?.receipt_id as string;
             const planHash = (confirmNorm as any)?.plan_hash as string;
+            const nonce = (confirmNorm as any)?.nonce as string;
 
-            const st = getReceiptState(rid);
+            const consumeResult = persistence.receipts.consumeReceipt({
+              receipt_id: rid,
+              plan_hash: planHash,
+              nonce,
+              nowIso: requestTs,
+            });
 
-           
-            if (st.status === "consumed" && st.plan_hash === planHash) {
-              (out as any).guardrail.already_executed = true;
-              (out as any).guardrail.executed = true;
-            } else if (st.status === "active" && st.plan_hash === planHash) {
-             
-              consumeReceipt(rid, planHash);
-
-              telemetry.recordAction({
-                rule_id: ruleId,
-                decision: "REQUIRE_CONFIRM",
-                interruption_id: rid,
-                user_action: "confirmed",
-                signals: signals ?? {},
+            if (!consumeResult.ok) {
+              appendDecisionEvent({
+                decision_id: decisionId,
+                ts: requestTs,
+                event_type: "execute.rejected",
+                action: "EXECUTE",
+                verdict: "EXECUTE_REJECTED",
+                policy_version: config.app.version,
+                engine_version: config.app.version,
+                reason_codes: [...baseReasonCodes, consumeResult.error],
+                receipt_id: rid,
+                plan_hash: planHash,
+                nonce,
+                message: `Execution rejected: ${consumeResult.error}.`,
               });
-            } else {
- 
+
               const out2 = assess({ config, signals, confirm: undefined });
               appendArtifact(STATE_FILE, "decision", out2);
 
               const g2 = (out2 as any)?.guardrail;
               const r2 = g2?.receipt;
+              const r2Reuse =
+                typeof r2?.plan_hash === "string"
+                  ? persistence.receipts.findActiveReceiptByPlanHash(r2.plan_hash, requestTs)
+                  : null;
 
-              const r2PlanHash = r2?.plan_hash;
-              const r2Reuse = typeof r2PlanHash === "string" ? findActiveReceiptByPlanHash(r2PlanHash) : null;
               if (r2Reuse && g2?.receipt) {
                 g2.receipt.receipt_id = r2Reuse.receipt_id;
                 g2.receipt.plan_hash = r2Reuse.plan_hash;
+                g2.receipt.nonce = r2Reuse.nonce;
                 g2.receipt.scope = r2Reuse.scope;
               }
 
@@ -411,13 +527,55 @@ async function main() {
                 g2?.action === "REQUIRE_CONFIRM" &&
                 r2?.receipt_id &&
                 r2?.plan_hash &&
+                r2?.nonce &&
                 (!r2Reuse || r2Reuse.receipt_id !== r2.receipt_id)
               ) {
-                issueReceipt({
+                persistence.receipts.issueReceipt({
                   receipt_id: r2.receipt_id,
                   plan_hash: r2.plan_hash,
+                  nonce: r2.nonce,
                   scope: "this_call_only",
+                  issued_at: requestTs,
+                  expires_at: addMinutes(requestTs, 5),
                 });
+                appendDecisionEvent({
+                  decision_id: decisionId,
+                  ts: requestTs,
+                  event_type: "receipt.issued",
+                  action: "EXECUTE",
+                  verdict: "REQUIRE_CONFIRM",
+                  policy_version: config.app.version,
+                  engine_version: config.app.version,
+                  reason_codes: [...baseReasonCodes, consumeResult.error],
+                  receipt_id: r2.receipt_id,
+                  plan_hash: r2.plan_hash,
+                  nonce: r2.nonce,
+                  message: "Replacement receipt issued after execute rejection.",
+                });
+              } else if (r2Reuse) {
+                appendDecisionEvent({
+                  decision_id: decisionId,
+                  ts: requestTs,
+                  event_type: "receipt.reused",
+                  action: "EXECUTE",
+                  verdict: "REQUIRE_CONFIRM",
+                  policy_version: config.app.version,
+                  engine_version: config.app.version,
+                  reason_codes: [...baseReasonCodes, consumeResult.error],
+                  receipt_id: r2Reuse.receipt_id,
+                  plan_hash: r2Reuse.plan_hash,
+                  nonce: r2Reuse.nonce,
+                  message: "Active receipt reused after execute rejection.",
+                });
+              }
+
+              if (g2?.confirmation) {
+                g2.confirmation.rejected = true;
+                g2.confirmation.error = toConfirmationError(consumeResult.error);
+                g2.confirmation.provided = { receipt_id: rid, plan_hash: planHash, nonce };
+                if (r2?.plan_hash) {
+                  g2.confirmation.expected = { plan_hash: r2.plan_hash, nonce: r2?.nonce };
+                }
               }
 
               return {
@@ -426,12 +584,12 @@ async function main() {
                   {
                     type: "text",
                     text: [
-                      "⚠️ Decision Guardrail: REQUIRE_CONFIRM",
-                      `Reason: ${(g2?.reason ?? "High risk detected.") + " (confirmation rejected: invalid or replayed receipt)"}`,
+                      "Decision Guardrail: REQUIRE_CONFIRM",
+                      `Reason: ${(g2?.reason ?? "High risk detected.") + ` (confirmation rejected: ${consumeResult.error.toLowerCase()})`}`,
                       "",
                       "This action is blocked until you explicitly confirm the latest receipt.",
-                      r2?.receipt_id && r2?.plan_hash
-                        ? `Re-run the tool with: { signals: ..., confirm: { mode: "EXECUTE", receipt_id: "${r2.receipt_id}", plan_hash: "${r2.plan_hash}" } }`
+                      r2?.receipt_id && r2?.plan_hash && r2?.nonce
+                        ? `Re-run the tool with: { signals: ..., confirm: { mode: "EXECUTE", receipt_id: "${r2.receipt_id}", plan_hash: "${r2.plan_hash}", nonce: "${r2.nonce}" } }`
                         : `Re-run the tool with: { signals: ... }`,
                       "",
                       `Local-only log: ${telemetry.getFilePath()} (disable: DA_TELEMETRY=0)`,
@@ -443,6 +601,43 @@ async function main() {
                 ],
               };
             }
+
+            appendDecisionEvent({
+              decision_id: decisionId,
+              ts: requestTs,
+              event_type: "receipt.consumed",
+              action: "EXECUTE",
+              verdict: "EXECUTE_ACCEPTED",
+              policy_version: config.app.version,
+              engine_version: config.app.version,
+              reason_codes: baseReasonCodes,
+              receipt_id: rid,
+              plan_hash: planHash,
+              nonce,
+              message: "Receipt consumed successfully.",
+            });
+            appendDecisionEvent({
+              decision_id: decisionId,
+              ts: requestTs,
+              event_type: "execute.accepted",
+              action: "EXECUTE",
+              verdict: "EXECUTE_ACCEPTED",
+              policy_version: config.app.version,
+              engine_version: config.app.version,
+              reason_codes: baseReasonCodes,
+              receipt_id: rid,
+              plan_hash: planHash,
+              nonce,
+              message: `Execution accepted for key ${buildExecutionKey(rid, planHash, nonce)}.`,
+            });
+
+            telemetry.recordAction({
+              rule_id: ruleId,
+              decision: "REQUIRE_CONFIRM",
+              interruption_id: rid,
+              user_action: "confirmed",
+              signals: signals ?? {},
+            });
           }
 
           const confirmedPlan = guardrail?.confirmation?.confirmed_plan_hash;
@@ -451,37 +646,23 @@ async function main() {
             : "[confirmed] Guardrail ALLOW\n\n";
 
           return {
-            content: [
-              {
-                type: "text",
-                text: header + JSON.stringify(out, null, 2),
-              },
-            ],
+            content: [{ type: "text", text: header + JSON.stringify(out, null, 2) }],
           };
         }
 
         return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(out, null, 2),
-            },
-          ],
+          content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
         };
       }
 
       case "plan": {
         const out = plan({ decision: (safeArgs as any)?.decision });
-        return {
-          content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
-        };
+        return { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] };
       }
 
       case "followup": {
         const out = followup({ decision: (safeArgs as any)?.decision });
-        return {
-          content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
-        };
+        return { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] };
       }
 
       default:
@@ -491,12 +672,8 @@ async function main() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-
- 
 }
 
-main().catch((_err) => {
+main().catch(() => {
   process.exit(1);
 });
-
-
