@@ -14,6 +14,14 @@ import {
   type DecisionLogEvent,
 } from "./persistence/receipt_store.js";
 import { createMcpServer } from "./runtime/mcp_server.js";
+import {
+  createErrorPayload,
+  createToolErrorResult,
+  DecisionAssistantError,
+  EXIT_PERSISTENCE_FAILURE,
+  fatalExitFromError,
+  toUnknownErrorPayload,
+} from "./runtime/error_semantics.js";
 import { detectTriggers } from "./runtime/tools/detect_triggers.js";
 import { followup } from "./runtime/tools/followup.js";
 import { plan } from "./runtime/tools/plan.js";
@@ -170,9 +178,25 @@ function toConfirmationError(error: ConsumeReceiptError):
   }
 }
 
+function withPersistence<T>(operation: string, fn: () => T): T {
+  try {
+    return fn();
+  } catch (error) {
+    throw new DecisionAssistantError({
+      code: "PERSISTENCE_FAILURE",
+      message: "Persistence operation failed.",
+      exitCode: EXIT_PERSISTENCE_FAILURE,
+      details: {
+        operation,
+        ...(error instanceof Error ? { cause: error.message } : {}),
+      },
+    });
+  }
+}
+
 async function main() {
   const config = loadConfig();
-  const persistence = createSqlitePersistence();
+  const persistence = withPersistence("create_sqlite_persistence", () => createSqlitePersistence());
 
   const server = createMcpServer({
     name: config.app.name,
@@ -184,11 +208,13 @@ async function main() {
   const appendDecisionEvent = (
     event: Omit<DecisionLogEvent, "event_id" | "schema_version">
   ): void => {
-    persistence.decisionLogs.append({
-      event_id: makeEventId(),
-      schema_version: "decision-assistant/decision-log/v1",
-      ...event,
-    });
+    withPersistence("append_decision_log", () =>
+      persistence.decisionLogs.append({
+        event_id: makeEventId(),
+        schema_version: "decision-assistant/decision-log/v1",
+        ...event,
+      })
+    );
   };
 
   server.setRequestHandler(ToolsListRequestSchema as any, async () => {
@@ -280,11 +306,12 @@ async function main() {
   });
 
   server.setRequestHandler(ToolsCallRequestSchema as any, async (request: any) => {
-    const toolName: string = request.params.name;
-    const args: ToolCallArgs = request.params.arguments;
-    const safeArgs = clampText(args) as ToolCallArgs;
+    try {
+      const toolName: string = request.params.name;
+      const args: ToolCallArgs = request.params.arguments;
+      const safeArgs = clampText(args) as ToolCallArgs;
 
-    switch (toolName) {
+      switch (toolName) {
       case "detect_triggers": {
         const out = detectTriggers({
           signals: (safeArgs as any)?.signals as TriggerSignals | undefined,
@@ -295,7 +322,15 @@ async function main() {
 
       case "assess": {
         const signals = (safeArgs as any)?.signals as TriggerSignals | undefined;
-        if (!signals) throw new Error("signals parameter is required");
+        if (!signals) {
+          return createToolErrorResult(
+            createErrorPayload({
+              code: "INVALID_INPUT",
+              message: "signals parameter is required",
+              details: { tool: "assess", field: "signals" },
+            })
+          );
+        }
 
         const requestTs = nowIso();
         const decisionId = makeDecisionId();
@@ -379,7 +414,9 @@ async function main() {
 
           const activeReceipt =
             typeof planHash === "string"
-              ? persistence.receipts.findActiveReceiptByPlanHash(planHash, requestTs)
+              ? withPersistence("find_active_receipt_by_plan_hash", () =>
+                  persistence.receipts.findActiveReceiptByPlanHash(planHash, requestTs)
+                )
               : null;
 
           if (activeReceipt && (out as any)?.guardrail?.receipt) {
@@ -397,14 +434,16 @@ async function main() {
             typeof nonce === "string" &&
             (!activeReceipt || activeReceipt.receipt_id !== receiptId)
           ) {
-            persistence.receipts.issueReceipt({
-              receipt_id: receiptId,
-              plan_hash: planHash,
-              nonce,
-              scope: "this_call_only",
-              issued_at: requestTs,
-              expires_at: addMinutes(requestTs, 5),
-            });
+            withPersistence("issue_receipt", () =>
+              persistence.receipts.issueReceipt({
+                receipt_id: receiptId,
+                plan_hash: planHash,
+                nonce,
+                scope: "this_call_only",
+                issued_at: requestTs,
+                expires_at: addMinutes(requestTs, 5),
+              })
+            );
             appendDecisionEvent({
               decision_id: decisionId,
               ts: requestTs,
@@ -483,12 +522,14 @@ async function main() {
             const planHash = (confirmNorm as any)?.plan_hash as string;
             const nonce = (confirmNorm as any)?.nonce as string;
 
-            const consumeResult = persistence.receipts.consumeReceipt({
-              receipt_id: rid,
-              plan_hash: planHash,
-              nonce,
-              nowIso: requestTs,
-            });
+            const consumeResult = withPersistence("consume_receipt", () =>
+              persistence.receipts.consumeReceipt({
+                receipt_id: rid,
+                plan_hash: planHash,
+                nonce,
+                nowIso: requestTs,
+              })
+            );
 
             if (!consumeResult.ok) {
               appendDecisionEvent({
@@ -513,7 +554,9 @@ async function main() {
               const r2 = g2?.receipt;
               const r2Reuse =
                 typeof r2?.plan_hash === "string"
-                  ? persistence.receipts.findActiveReceiptByPlanHash(r2.plan_hash, requestTs)
+                  ? withPersistence("find_active_receipt_by_plan_hash", () =>
+                      persistence.receipts.findActiveReceiptByPlanHash(r2.plan_hash, requestTs)
+                    )
                   : null;
 
               if (r2Reuse && g2?.receipt) {
@@ -530,14 +573,16 @@ async function main() {
                 r2?.nonce &&
                 (!r2Reuse || r2Reuse.receipt_id !== r2.receipt_id)
               ) {
-                persistence.receipts.issueReceipt({
-                  receipt_id: r2.receipt_id,
-                  plan_hash: r2.plan_hash,
-                  nonce: r2.nonce,
-                  scope: "this_call_only",
-                  issued_at: requestTs,
-                  expires_at: addMinutes(requestTs, 5),
-                });
+                withPersistence("issue_receipt", () =>
+                  persistence.receipts.issueReceipt({
+                    receipt_id: r2.receipt_id,
+                    plan_hash: r2.plan_hash,
+                    nonce: r2.nonce,
+                    scope: "this_call_only",
+                    issued_at: requestTs,
+                    expires_at: addMinutes(requestTs, 5),
+                  })
+                );
                 appendDecisionEvent({
                   decision_id: decisionId,
                   ts: requestTs,
@@ -665,8 +710,17 @@ async function main() {
         return { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] };
       }
 
-      default:
-        throw new Error(`Unknown tool: ${toolName}`);
+        default:
+          return createToolErrorResult(
+            createErrorPayload({
+              code: "UNKNOWN_TOOL",
+              message: `Unknown tool: ${toolName}`,
+              details: { tool: toolName },
+            })
+          );
+      }
+    } catch (error) {
+      return createToolErrorResult(toUnknownErrorPayload(error));
     }
   });
 
@@ -674,6 +728,6 @@ async function main() {
   await server.connect(transport);
 }
 
-main().catch(() => {
-  process.exit(1);
+main().catch((error) => {
+  fatalExitFromError(error);
 });

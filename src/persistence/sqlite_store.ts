@@ -2,6 +2,32 @@ import { DatabaseSync } from "node:sqlite";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+// application_id identifies Decision Assistant-owned SQLite files without
+// affecting the public receipt or decision-log contracts.
+const SQLITE_APPLICATION_ID = 0x44415354;
+// user_version tracks persisted schema shape. Bump it only when on-disk table,
+// index, or trigger layout changes in a way that requires migration logic.
+const SQLITE_SCHEMA_USER_VERSION = 1;
+const SQLITE_BUSY_TIMEOUT_MS = 5_000;
+
+type SqliteStoreErrorCode =
+  | "PERSISTENCE_OPEN_FAILED"
+  | "PERSISTENCE_INVALID_STORE_IDENTITY"
+  | "PERSISTENCE_UNSUPPORTED_SCHEMA_VERSION"
+  | "PERSISTENCE_PARTIAL_SCHEMA"
+  | "PERSISTENCE_WRITE_FAILED";
+
+class SqliteStoreError extends Error {
+  constructor(
+    readonly code: SqliteStoreErrorCode,
+    message: string,
+    readonly cause?: unknown
+  ) {
+    super(message);
+    this.name = "SqliteStoreError";
+  }
+}
+
 export type ReceiptScope = "this_call_only";
 export type ReceiptStatus = "active" | "consumed";
 
@@ -107,6 +133,16 @@ export interface PersistenceStore {
   close(): void;
 }
 
+export type SqliteRuntimeMetadata = {
+  journal_mode: string;
+  synchronous: number;
+  foreign_keys: number;
+  busy_timeout: number;
+  user_version: number;
+  application_id: number;
+  triggers: string[];
+};
+
 type ReceiptRow = {
   receipt_id: string;
   plan_hash: string;
@@ -117,6 +153,51 @@ type ReceiptRow = {
   expires_at: string;
   consumed_at: string | null;
 };
+
+type ExistingStoreState = {
+  application_id: number;
+  user_version: number;
+  user_tables: string[];
+};
+
+const CRITICAL_TABLES = ["receipts", "replay_index", "decision_logs"] as const;
+const CRITICAL_COLUMNS = {
+  receipts: [
+    "receipt_id",
+    "plan_hash",
+    "nonce",
+    "scope",
+    "status",
+    "issued_at",
+    "expires_at",
+    "consumed_at",
+  ],
+  replay_index: ["execution_key", "receipt_id", "plan_hash", "nonce", "consumed_at"],
+  decision_logs: [
+    "seq",
+    "event_id",
+    "schema_version",
+    "decision_id",
+    "ts",
+    "event_type",
+    "action",
+    "verdict",
+    "policy_version",
+    "engine_version",
+    "reason_codes",
+    "receipt_id",
+    "plan_hash",
+    "nonce",
+    "message",
+    "payload_json",
+  ],
+} as const;
+
+const LEGACY_ALLOWED_MISSING_COLUMNS = {
+  decision_logs: new Set(["schema_version"]),
+} as const;
+
+const CRITICAL_TRIGGERS = ["trg_decision_logs_no_update", "trg_decision_logs_no_delete"] as const;
 
 function ensureDirForFile(filePath: string): void {
   const dir = dirname(filePath);
@@ -138,6 +219,150 @@ function rowToReceipt(row: ReceiptRow): StoredReceipt {
 
 function buildExecutionKey(receipt_id: string, plan_hash: string, nonce: string): string {
   return `${receipt_id}:${plan_hash}:${nonce}`;
+}
+
+function isSqliteStoreError(error: unknown): error is SqliteStoreError {
+  return error instanceof SqliteStoreError;
+}
+
+function listUserTables(db: DatabaseSync): string[] {
+  return db
+    .prepare(
+      `SELECT name
+       FROM sqlite_master
+       WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+       ORDER BY name ASC`
+    )
+    .all<{ name: string }>()
+    .map((row) => row.name);
+}
+
+function listTableColumns(db: DatabaseSync, tableName: string): string[] {
+  return db
+    .prepare(`PRAGMA table_info(${tableName})`)
+    .all<{ name: string }>()
+    .map((column) => column.name);
+}
+
+function listTriggers(db: DatabaseSync): string[] {
+  return db
+    .prepare(
+      `SELECT name
+       FROM sqlite_master
+       WHERE type = 'trigger'
+       ORDER BY name ASC`
+    )
+    .all<{ name: string }>()
+    .map((row) => row.name);
+}
+
+function readExistingStoreState(db: DatabaseSync): ExistingStoreState {
+  const applicationId = db.prepare(`PRAGMA application_id`).get<{ application_id: number }>();
+  const userVersion = db.prepare(`PRAGMA user_version`).get<{ user_version: number }>();
+
+  return {
+    application_id: applicationId?.application_id ?? 0,
+    user_version: userVersion?.user_version ?? 0,
+    user_tables: listUserTables(db),
+  };
+}
+
+function validateExistingStoreState(db: DatabaseSync, state: ExistingStoreState): void {
+  if (state.application_id !== 0 && state.application_id !== SQLITE_APPLICATION_ID) {
+    throw new SqliteStoreError(
+      "PERSISTENCE_INVALID_STORE_IDENTITY",
+      `Unexpected SQLite application_id=${state.application_id}`
+    );
+  }
+
+  if (state.user_version > SQLITE_SCHEMA_USER_VERSION) {
+    throw new SqliteStoreError(
+      "PERSISTENCE_UNSUPPORTED_SCHEMA_VERSION",
+      `Unsupported SQLite user_version=${state.user_version}`
+    );
+  }
+
+  if (state.user_tables.length === 0) {
+    return;
+  }
+
+  const presentCriticalTables = CRITICAL_TABLES.filter((table) => state.user_tables.includes(table));
+  if (presentCriticalTables.length === 0) {
+    throw new SqliteStoreError(
+      "PERSISTENCE_INVALID_STORE_IDENTITY",
+      "Existing SQLite file is not a Decision Assistant persistence store"
+    );
+  }
+
+  if (presentCriticalTables.length !== CRITICAL_TABLES.length) {
+    throw new SqliteStoreError(
+      "PERSISTENCE_PARTIAL_SCHEMA",
+      `Partial persistence schema detected: found tables=${presentCriticalTables.join(",")}`
+    );
+  }
+
+  for (const table of CRITICAL_TABLES) {
+    const columns = listTableColumns(db, table);
+    const requiredColumns = CRITICAL_COLUMNS[table];
+    const missingColumns = requiredColumns.filter((column) => !columns.includes(column));
+
+    const allowedLegacyMissing = table in LEGACY_ALLOWED_MISSING_COLUMNS
+      ? LEGACY_ALLOWED_MISSING_COLUMNS[table as keyof typeof LEGACY_ALLOWED_MISSING_COLUMNS]
+      : undefined;
+
+    const unsupportedMissing = missingColumns.filter(
+      (column) => !(allowedLegacyMissing?.has(column as never) ?? false)
+    );
+
+    if (unsupportedMissing.length > 0) {
+      throw new SqliteStoreError(
+        "PERSISTENCE_PARTIAL_SCHEMA",
+        `Critical persistence columns missing in ${table}: ${unsupportedMissing.join(",")}`
+      );
+    }
+  }
+}
+
+function configureRuntimePragmas(db: DatabaseSync): void {
+  db.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
+    PRAGMA foreign_keys = ON;
+    PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};
+  `);
+}
+
+function configureOpenPragmas(db: DatabaseSync): void {
+  db.exec(`
+    PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};
+  `);
+}
+
+function validateCriticalStructures(db: DatabaseSync): void {
+  const userTables = listUserTables(db);
+  for (const table of CRITICAL_TABLES) {
+    if (!userTables.includes(table)) {
+      throw new SqliteStoreError("PERSISTENCE_PARTIAL_SCHEMA", `Missing critical table ${table}`);
+    }
+  }
+
+  for (const table of CRITICAL_TABLES) {
+    const columns = listTableColumns(db, table);
+    const missingColumns = CRITICAL_COLUMNS[table].filter((column) => !columns.includes(column));
+    if (missingColumns.length > 0) {
+      throw new SqliteStoreError(
+        "PERSISTENCE_PARTIAL_SCHEMA",
+        `Missing critical columns in ${table}: ${missingColumns.join(",")}`
+      );
+    }
+  }
+
+  const triggers = listTriggers(db);
+  for (const trigger of CRITICAL_TRIGGERS) {
+    if (!triggers.includes(trigger)) {
+      throw new SqliteStoreError("PERSISTENCE_PARTIAL_SCHEMA", `Missing critical trigger ${trigger}`);
+    }
+  }
 }
 
 class SqliteReceiptRepository implements ReceiptRepository {
@@ -537,7 +762,6 @@ class SqliteDecisionLogRepository implements DecisionLogRepository {
 
 function initializeSchema(db: DatabaseSync): void {
   db.exec(`
-    PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS receipts (
       receipt_id TEXT PRIMARY KEY,
       plan_hash TEXT NOT NULL,
@@ -581,12 +805,61 @@ function initializeSchema(db: DatabaseSync): void {
 
     CREATE INDEX IF NOT EXISTS idx_decision_logs_decision
       ON decision_logs (decision_id, seq);
+
+    CREATE TRIGGER IF NOT EXISTS trg_decision_logs_no_update
+      BEFORE UPDATE ON decision_logs
+      BEGIN
+        SELECT RAISE(ABORT, 'decision_logs is append-only');
+      END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_decision_logs_no_delete
+      BEFORE DELETE ON decision_logs
+      BEGIN
+        SELECT RAISE(ABORT, 'decision_logs is append-only');
+      END;
   `);
 
   const columns = db.prepare(`PRAGMA table_info(decision_logs)`).all<{ name: string }>();
   if (!columns.some((column) => column.name === "schema_version")) {
+    // Legacy v0.5 databases may not have schema_version yet. The append-only
+    // triggers do not block ALTER TABLE or future INSERT-only writes.
     db.exec(
       `ALTER TABLE decision_logs ADD COLUMN schema_version TEXT NOT NULL DEFAULT 'decision-assistant/decision-log/v1'`
+    );
+  }
+
+  db.exec(`
+    PRAGMA application_id = ${SQLITE_APPLICATION_ID};
+    PRAGMA user_version = ${SQLITE_SCHEMA_USER_VERSION};
+  `);
+}
+
+function openValidatedSqliteDatabase(dbPath: string): DatabaseSync {
+  let db: DatabaseSync;
+
+  try {
+    db = new DatabaseSync(dbPath);
+  } catch (error) {
+    throw new SqliteStoreError("PERSISTENCE_OPEN_FAILED", `Failed to open SQLite store at ${dbPath}`, error);
+  }
+
+  try {
+    configureOpenPragmas(db);
+    const existingState = readExistingStoreState(db);
+    validateExistingStoreState(db, existingState);
+    configureRuntimePragmas(db);
+    initializeSchema(db);
+    validateCriticalStructures(db);
+    return db;
+  } catch (error) {
+    db.close();
+    if (isSqliteStoreError(error)) {
+      throw error;
+    }
+    throw new SqliteStoreError(
+      "PERSISTENCE_WRITE_FAILED",
+      `Failed to initialize or validate SQLite store at ${dbPath}`,
+      error
     );
   }
 }
@@ -597,8 +870,7 @@ export function defaultSqlitePath(): string {
 
 export function createSqlitePersistence(dbPath: string = defaultSqlitePath()): PersistenceStore {
   ensureDirForFile(dbPath);
-  const db = new DatabaseSync(dbPath);
-  initializeSchema(db);
+  const db = openValidatedSqliteDatabase(dbPath);
 
   return {
     receipts: new SqliteReceiptRepository(db),
@@ -610,4 +882,32 @@ export function createSqlitePersistence(dbPath: string = defaultSqlitePath()): P
   };
 }
 
-export { buildExecutionKey };
+export function inspectSqliteRuntime(dbPath: string = defaultSqlitePath()): SqliteRuntimeMetadata {
+  ensureDirForFile(dbPath);
+  const db = openValidatedSqliteDatabase(dbPath);
+
+  try {
+    const journalMode = db.prepare(`PRAGMA journal_mode`).get<{ journal_mode: string }>();
+    const synchronous = db.prepare(`PRAGMA synchronous`).get<{ synchronous: number }>();
+    const foreignKeys = db.prepare(`PRAGMA foreign_keys`).get<{ foreign_keys: number }>();
+    const busyTimeout = db.prepare(`PRAGMA busy_timeout`).get<{ timeout: number } | { busy_timeout: number }>();
+    const userVersion = db.prepare(`PRAGMA user_version`).get<{ user_version: number }>();
+    const applicationId = db.prepare(`PRAGMA application_id`).get<{ application_id: number }>();
+    const triggers = listTriggers(db);
+
+    return {
+      journal_mode: journalMode?.journal_mode ?? "",
+      synchronous: synchronous?.synchronous ?? -1,
+      foreign_keys: foreignKeys?.foreign_keys ?? 0,
+      busy_timeout:
+        "timeout" in (busyTimeout ?? {}) ? (busyTimeout as { timeout: number }).timeout : (busyTimeout as { busy_timeout: number } | undefined)?.busy_timeout ?? 0,
+      user_version: userVersion?.user_version ?? 0,
+      application_id: applicationId?.application_id ?? 0,
+      triggers,
+    };
+  } finally {
+    db.close();
+  }
+}
+
+export { buildExecutionKey, SQLITE_APPLICATION_ID, SQLITE_BUSY_TIMEOUT_MS, SQLITE_SCHEMA_USER_VERSION };
