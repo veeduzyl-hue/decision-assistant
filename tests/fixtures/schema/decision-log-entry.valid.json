@@ -1,0 +1,17 @@
+{
+  "schema_version": "decision-assistant/decision-log/v1",
+  "event_id": "evt_0001",
+  "decision_id": "dec_0001",
+  "ts": "2026-03-16T10:00:00Z",
+  "event_type": "receipt.issued",
+  "action": "ASSESS",
+  "verdict": "REQUIRE_CONFIRM",
+  "policy_version": "policy-v1",
+  "engine_version": "engine-v1",
+  "reason_codes": [
+    "FILES_TOUCHED_WARN"
+  ],
+  "receipt_id": "gr_10af2f50c2ce",
+  "plan_hash": "plan_97d4da118562",
+  "message": "Receipt issued for guarded execution."
+}

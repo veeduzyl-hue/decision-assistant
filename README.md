@@ -59,16 +59,32 @@ Repeated `EXECUTE` with the same consumed execution key is rejected as replay.
 
 ---
 
-## Install in Cursor (recommended: `npx`)
+## Install
 
-Add this to your Cursor MCP configuration:
+Published package:
+
+```bash
+npm install -g decision-assistant@0.5.0
+```
+
+Minimal runtime path:
+
+```bash
+decision-assistant
+```
+
+This starts the MCP stdio server and waits for a client connection.
+
+Validated runtime floor for the current v0.5 release gate: Node.js 24+.
+
+Add this to your Cursor MCP configuration for the documented MCP startup path:
 
 ```json
 {
   "mcpServers": {
     "decision-assistant": {
       "command": "npx",
-      "args": ["-y", "decision-assistant@0.3.1"]
+      "args": ["-y", "decision-assistant@0.5.0"]
     }
   }
 }
@@ -86,8 +102,12 @@ After restarting Cursor, you should see:
 ### Notes
 
 - This package is published on npm as `decision-assistant`.
-- Pinning `@0.3.1` is recommended for reproducible verification.
+- Pinning `@0.5.0` is recommended for reproducible verification.
 - After validation, you may switch to `decision-assistant@latest`.
+- The public package surface is the package identity, the `decision-assistant` bin, and the shipped `config/schema/*` machine-contract files.
+- Internal source layout and deep imports into `dist/*` are not public API.
+- `config/schema/receipt.schema.json` defines only the caller-visible runtime receipt binding returned by the assess flow.
+- The persisted SQLite receipt row is an internal persistence contract, not the public receipt schema.
 
 ---
 
@@ -143,7 +163,7 @@ npm run build
 
 ---
 
-## Run tests
+## Verification
 
 ### Build
 
@@ -161,6 +181,20 @@ npm run verify:machine-contracts
 
 ```bash
 npm run verify:guardrail
+```
+
+### Package surface
+
+```bash
+npm run verify:package-surface
+npm run verify:pack-contents
+```
+
+### Smoke tests
+
+```bash
+npm run verify:install-smoke
+npm run verify:use-smoke
 ```
 
 Expected: all pass.
@@ -253,7 +287,7 @@ Key invariants you must not break:
 If you run:
 
 ```bash
-npx decision-assistant@0.3.1
+npx decision-assistant@0.5.0
 ```
 
 and nothing prints, this is **expected behavior**.

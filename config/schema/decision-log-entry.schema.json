@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://decision-assistant.local/config/schema/decision-log.schema.json",
+  "$id": "https://decision-assistant.local/config/schema/decision-log-entry.schema.json",
   "title": "Decision Assistant Decision Log Entry v1",
   "type": "object",
   "additionalProperties": false,

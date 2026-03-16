@@ -100,7 +100,7 @@ export type AppConfig = {
 export const defaultConfig: AppConfig = {
   app: {
     name: "decision-assistant",
-    version: "0.2.1",
+    version: "0.5.0",
   },
 
   // IMPORTANT: default to full so latent rules can run unless explicitly set to cold

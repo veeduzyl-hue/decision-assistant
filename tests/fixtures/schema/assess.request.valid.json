@@ -1,0 +1,23 @@
+{
+  "signals": {
+    "files_touched": 10,
+    "diff_lines_total": 120,
+    "touches_package_json": false,
+    "touches_lockfile": false,
+    "files_touched_per_change_median": 5,
+    "lines_added": 80,
+    "active_duration_ms": 120000,
+    "input_source": "cursor",
+    "active_goal": "reduce risk before execute",
+    "touched_paths": [
+      "src/server.ts",
+      "src/modules/assess/assess.ts"
+    ]
+  },
+  "confirm": {
+    "mode": "EXECUTE",
+    "receipt_id": "gr_10af2f50c2ce",
+    "plan_hash": "plan_97d4da118562",
+    "nonce": "nonce_1234567890abcdef"
+  }
+}

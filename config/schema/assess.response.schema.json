@@ -1,0 +1,387 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://decision-assistant.local/config/schema/assess.response.schema.json",
+  "title": "Decision Assistant Assess Response Payload v1",
+  "description": "Schema for the JSON decision payload serialized inside the assess tool text response.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "rule_hit",
+    "risk",
+    "decision",
+    "infraSignals",
+    "policy",
+    "guardrail"
+  ],
+  "properties": {
+    "rule_hit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_id",
+        "hit",
+        "reasons",
+        "signals"
+      ],
+      "properties": {
+        "rule_id": {
+          "const": "refactor_time_blackhole"
+        },
+        "hit": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "signals": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "ship_gap_days": {
+              "type": "number"
+            },
+            "refactor_commits_ratio": {
+              "type": "number"
+            },
+            "todo_growth_ratio": {
+              "type": "number"
+            },
+            "churn_ratio": {
+              "type": "number"
+            },
+            "files_touched": {
+              "type": "number"
+            },
+            "diff_lines_total": {
+              "type": "number"
+            },
+            "touches_package_json": {
+              "type": "boolean"
+            },
+            "touches_lockfile": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "score",
+        "reasons",
+        "breakdown"
+      ],
+      "properties": {
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "breakdown": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "timeSink",
+            "amplification",
+            "rework",
+            "smells",
+            "adjust"
+          ],
+          "properties": {
+            "timeSink": {
+              "type": "number"
+            },
+            "amplification": {
+              "type": "number"
+            },
+            "rework": {
+              "type": "number"
+            },
+            "smells": {
+              "type": "number"
+            },
+            "adjust": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision",
+        "risk_score",
+        "reasons"
+      ],
+      "properties": {
+        "decision": {
+          "enum": [
+            "ALLOW",
+            "SCOPED_REFACTOR",
+            "HARD_REFACTOR"
+          ]
+        },
+        "risk_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "infraSignals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "value"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "files_touched",
+              "diff_lines_total",
+              "touches_package_json",
+              "touches_lockfile",
+              "touched_paths",
+              "lines_added",
+              "active_duration_ms",
+              "input_source",
+              "active_goal",
+              "files_touched_per_change_median"
+            ]
+          },
+          "value": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "context": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "reason"
+      ],
+      "properties": {
+        "action": {
+          "enum": [
+            "ALLOW",
+            "WARN",
+            "BLOCK"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "suggestedExits": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "STOP",
+              "TIMEBOX_10",
+              "VALIDATE_FIRST"
+            ]
+          }
+        }
+      }
+    },
+    "guardrail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "enum": [
+            "ALLOW",
+            "REQUIRE_CONFIRM",
+            "BLOCK"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "receipt": {
+          "$ref": "#/$defs/receipt"
+        },
+        "executed": {
+          "type": "boolean"
+        },
+        "confirmation": {
+          "$ref": "#/$defs/confirmation"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "enum": [
+                  "REQUIRE_CONFIRM",
+                  "BLOCK"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reason"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt_id",
+        "plan_hash",
+        "nonce",
+        "scope"
+      ],
+      "properties": {
+        "receipt_id": {
+          "type": "string"
+        },
+        "plan_hash": {
+          "type": "string"
+        },
+        "nonce": {
+          "type": "string"
+        },
+        "scope": {
+          "const": "this_call_only"
+        }
+      }
+    },
+    "confirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required"
+      ],
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "acknowledged": {
+          "type": "boolean"
+        },
+        "ack_receipt_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmed": {
+          "type": "boolean"
+        },
+        "confirmed_plan_hash": {
+          "type": "string"
+        },
+        "confirmed_receipt_id": {
+          "type": "string"
+        },
+        "confirmed_nonce": {
+          "type": "string"
+        },
+        "rejected": {
+          "type": "boolean"
+        },
+        "error": {
+          "enum": [
+            "STALE_RECEIPT_OR_PLAN_CHANGED",
+            "INVALID_CONFIRM_PAYLOAD",
+            "MISSING_RECEIPT",
+            "RECEIPT_CONSUMED",
+            "NONCE_MISMATCH",
+            "REPLAY_DETECTED",
+            "RECEIPT_EXPIRED",
+            "INVALID_RECEIPT",
+            "PLAN_HASH_MISMATCH"
+          ]
+        },
+        "provided": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "receipt_id",
+            "plan_hash"
+          ],
+          "properties": {
+            "receipt_id": {
+              "type": "string"
+            },
+            "plan_hash": {
+              "type": "string"
+            },
+            "nonce": {
+              "type": "string"
+            }
+          }
+        },
+        "expected": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "plan_hash"
+          ],
+          "properties": {
+            "plan_hash": {
+              "type": "string"
+            },
+            "nonce": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

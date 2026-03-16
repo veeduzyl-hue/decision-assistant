@@ -1,11 +1,17 @@
 {
   "name": "decision-assistant",
-  "version": "0.3.1",
+  "version": "0.5.0",
   "description": "Decision guardrail MCP server for AI coding",
   "type": "module",
   "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
   "bin": {
     "decision-assistant": "bin/decision-assistant.mjs"
+  },
+  "exports": {
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
@@ -13,7 +19,7 @@
     "config"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/clean_dist.mjs && tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "dev": "node --watch --enable-source-maps dist/server.js",
     "verify:determinism": "npm run build && npx tsx scripts/verify_determinism.ts",
@@ -21,8 +27,14 @@
     "verify:receipt-lifecycle": "npm run build && npx tsx scripts/verify_receipt_lifecycle.ts",
     "verify:guardrail": "npm run build && npx tsx scripts/verify_guardrail.ts",
     "verify:decision-logs": "npm run build && npx tsx scripts/verify_decision_logs.ts",
+    "verify:package-surface": "node scripts/verify_package_surface.mjs",
+    "verify:pack-contents": "npm run build && node scripts/verify_npm_pack_contents.mjs",
+    "verify:install-smoke": "npm run build && node scripts/verify_install_smoke.mjs",
+    "verify:use-smoke": "npm run build && node scripts/verify_use_smoke.mjs",
     "verify:machine-contracts": "node scripts/verify_machine_contracts.mjs",
+    "verify:error-semantics": "npm run build && node scripts/verify_error_semantics.mjs",
     "verify:ai_momentum_override": "npm run build && node scripts/verify_ai_momentum_override.js",
+    "release:gate": "npm run build && npm run verify:machine-contracts && npm run verify:guardrail && npm run verify:determinism && npm run verify:replay-protection && npm run verify:receipt-lifecycle && npm run verify:decision-logs && npm run verify:error-semantics && npm run verify:package-surface && npm run verify:pack-contents && npm run verify:install-smoke && npm run verify:use-smoke",
     "release:local": "npm run verify:guardrail",
     "test": "vitest",
     "test:semantics": "vitest tests/receipt_semantics.test.ts",

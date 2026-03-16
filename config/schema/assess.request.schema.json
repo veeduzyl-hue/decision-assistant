@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://decision-assistant.local/config/schema/assess.request.schema.json",
+  "title": "Decision Assistant Assess Request v1",
+  "description": "Schema for the assess tool arguments currently accepted by the MCP server. This covers the tool argument object, not the outer JSON-RPC envelope.",
+  "type": "object",
+  "required": [
+    "signals"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "signals": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "ship_gap_days": {
+          "type": "number"
+        },
+        "refactor_commits_ratio": {
+          "type": "number"
+        },
+        "todo_growth_ratio": {
+          "type": "number"
+        },
+        "churn_ratio": {
+          "type": "number"
+        },
+        "refactor_days": {
+          "type": "number"
+        },
+        "files_touched": {
+          "type": "number"
+        },
+        "diff_lines_total": {
+          "type": "number"
+        },
+        "touches_package_json": {
+          "type": "boolean"
+        },
+        "touches_lockfile": {
+          "type": "boolean"
+        },
+        "files_touched_per_change_median": {
+          "type": "number"
+        },
+        "lines_added": {
+          "type": "number"
+        },
+        "active_duration_ms": {
+          "type": "number"
+        },
+        "input_source": {
+          "type": "string"
+        },
+        "active_goal": {
+          "type": "string"
+        },
+        "touched_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "confirm": {
+      "description": "Current server behavior accepts legacy boolean confirm values and the structured ACK/EXECUTE objects.",
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "const": "ACK"
+            },
+            "receipt_id": {
+              "type": "string"
+            },
+            "plan_hash": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "receipt_id",
+            "plan_hash",
+            "nonce"
+          ],
+          "properties": {
+            "mode": {
+              "const": "EXECUTE"
+            },
+            "receipt_id": {
+              "type": "string"
+            },
+            "plan_hash": {
+              "type": "string"
+            },
+            "nonce": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

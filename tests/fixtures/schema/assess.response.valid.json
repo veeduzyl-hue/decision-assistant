@@ -1,0 +1,82 @@
+{
+  "rule_hit": {
+    "rule_id": "refactor_time_blackhole",
+    "hit": false,
+    "reasons": [],
+    "signals": {
+      "files_touched": 10,
+      "diff_lines_total": 120,
+      "touches_package_json": false,
+      "touches_lockfile": false
+    }
+  },
+  "risk": {
+    "score": 36,
+    "reasons": [
+      "Median files touched per change is 6 (>=6). (+12)",
+      "Structural/complexity smell hints are present. (+3)"
+    ],
+    "breakdown": {
+      "timeSink": 10,
+      "amplification": 12,
+      "rework": 5,
+      "smells": 3,
+      "adjust": 6
+    }
+  },
+  "decision": {
+    "decision": "SCOPED_REFACTOR",
+    "risk_score": 36,
+    "reasons": [
+      "Median files touched per change is 6 (>=6). (+12)"
+    ]
+  },
+  "infraSignals": [
+    {
+      "kind": "files_touched",
+      "value": 10,
+      "context": {
+        "source": "TriggerSignals"
+      }
+    },
+    {
+      "kind": "touches_package_json",
+      "value": false,
+      "context": {
+        "source": "TriggerSignals"
+      }
+    },
+    {
+      "kind": "touched_paths",
+      "value": [
+        "src/server.ts",
+        "src/modules/assess/assess.ts"
+      ],
+      "context": {
+        "source": "TriggerSignals"
+      }
+    }
+  ],
+  "policy": {
+    "action": "WARN",
+    "reason": "Refactor risk exceeded warn threshold (files_touched=10).",
+    "suggestedExits": [
+      "TIMEBOX_10",
+      "VALIDATE_FIRST"
+    ]
+  },
+  "guardrail": {
+    "action": "REQUIRE_CONFIRM",
+    "reason": "Refactor risk exceeded warn threshold (files_touched=10).",
+    "receipt": {
+      "receipt_id": "gr_10af2f50c2ce",
+      "plan_hash": "plan_97d4da118562",
+      "nonce": "nonce_1234567890abcdef",
+      "scope": "this_call_only"
+    },
+    "executed": false,
+    "confirmation": {
+      "required": true
+    }
+  }
+}
