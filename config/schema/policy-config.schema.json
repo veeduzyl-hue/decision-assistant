@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://decision-assistant.local/config/schema/policy-config.schema.json",
+  "title": "Decision Assistant Policy Config v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "app",
+    "mode",
+    "rules",
+    "guardrail",
+    "storage"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "decision-assistant/policy-config/v1"
+    },
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "mode": {
+      "enum": [
+        "cold",
+        "full"
+      ]
+    },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "refactor_time_blackhole",
+        "ai_momentum_override"
+      ],
+      "properties": {
+        "refactor_time_blackhole": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "thresholds",
+            "weights",
+            "copy"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "thresholds": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "refactor_days_without_ship",
+                "refactor_commits_ratio",
+                "todo_growth_ratio",
+                "churn_ratio"
+              ],
+              "properties": {
+                "refactor_days_without_ship": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "refactor_commits_ratio": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "todo_growth_ratio": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "churn_ratio": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              }
+            },
+            "weights": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "ship_gap",
+                "refactor_ratio",
+                "todo_growth",
+                "churn"
+              ],
+              "properties": {
+                "ship_gap": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "refactor_ratio": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "todo_growth": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "churn": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              }
+            },
+            "copy": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "title",
+                "summary"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "summary": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        },
+        "ai_momentum_override": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "thresholds"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "thresholds": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "files_touched_warn",
+                "diff_lines_warn"
+              ],
+              "properties": {
+                "files_touched_warn": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "diff_lines_warn": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "guardrail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "files_touched"
+      ],
+      "properties": {
+        "files_touched": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "warn",
+            "block"
+          ],
+          "properties": {
+            "warn": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "block": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifacts_dir"
+      ],
+      "properties": {
+        "artifacts_dir": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

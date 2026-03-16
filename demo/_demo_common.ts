@@ -25,6 +25,7 @@ export function summarize(out: AnyObj) {
     executed: Boolean(g?.executed),
     receipt_id: receipt?.receipt_id,
     plan_hash: receipt?.plan_hash,
+    nonce: receipt?.nonce,
     confirmation: g?.confirmation ?? null,
     reason: g?.reason ?? out?.policy?.reason ?? null,
   };

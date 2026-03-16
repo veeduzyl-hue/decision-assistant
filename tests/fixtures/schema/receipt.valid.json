@@ -1,0 +1,14 @@
+{
+  "schema_version": "decision-assistant/receipt/v1",
+  "decision_id": "dec_0001",
+  "policy_version": "policy-v1",
+  "engine_version": "engine-v1",
+  "receipt_id": "gr_10af2f50c2ce",
+  "plan_hash": "plan_97d4da118562",
+  "nonce": "nonce_0001",
+  "scope": "this_call_only",
+  "status": "active",
+  "issued_at": "2026-03-16T10:00:00Z",
+  "expires_at": "2026-03-16T10:05:00Z",
+  "consumed_at": null
+}

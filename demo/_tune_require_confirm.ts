@@ -1,4 +1,4 @@
-import { assess } from "../src/tools/assess.js";
+import { assess } from "../src/modules/assess/assess.js";
 import { loadConfig } from "../src/config/loadConfig.js";
 
 const config = loadConfig();

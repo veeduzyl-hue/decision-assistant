@@ -1,4 +1,4 @@
-import { assess } from "../src/tools/assess.js";
+import { assess } from "../src/modules/assess/assess.js";
 import { loadConfig } from "../src/config/loadConfig.js";
 import { printHeader, printJson, summarize, getArg, readLastRun, writeEvidence } from "./_demo_common.js";
 
@@ -8,21 +8,23 @@ const config = loadConfig();
 
 const argReceiptId = getArg("--receipt_id");
 const argPlanHash = getArg("--plan_hash");
+const argNonce = getArg("--nonce");
 
 const last = readLastRun();
 const receipt_id = argReceiptId ?? last?.receipt_id;
 const plan_hash = argPlanHash ?? last?.plan_hash;
+const nonce = argNonce ?? last?.nonce;
 const signals = last?.signals;
 
-if (!receipt_id || !plan_hash || !signals) {
-  console.error("[demo] Missing receipt_id/plan_hash/signals. Run demo_require_confirm.ts first.");
+if (!receipt_id || !plan_hash || !nonce || !signals) {
+  console.error("[demo] Missing receipt_id/plan_hash/nonce/signals. Run demo_require_confirm.ts first.");
   process.exit(2);
 }
 
 const out = assess({
   config,
   signals,
-  confirm: { mode: "EXECUTE", receipt_id, plan_hash },
+  confirm: { mode: "EXECUTE", receipt_id, plan_hash, nonce },
 } as any);
 
 const s = summarize(out);
