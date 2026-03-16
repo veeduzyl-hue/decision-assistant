@@ -1,273 +1,139 @@
-# Receipt Semantics — Normative Specification
+# Receipt Semantics
 
-**Status:** Normative  
-**Applies to:** Decision Assistant v0.2+  
-**Last reviewed:** v0.3 planning phase  
+**Status:** Normative
+**Applies to:** Decision Assistant v1.0 mainline
 
-This document defines **non-negotiable semantic constraints** for the receipt
-mechanism used by Decision Assistant.  
-Any implementation, refactor, optimization, or extension **MUST** comply with
-this specification unless explicitly versioned out.
+This document defines the runtime semantics for receipt issuance, verification, replay protection, and receipt-backed execution.
 
 ---
 
-## 1. Definitions
+## 1. Core Role
 
-### 1.1 Receipt
+A receipt is a server-authoritative execution capability bound to:
 
-A **receipt** is a **server-authoritative, single-use decision ticket** issued
-by the Decision Assistant server to allow or confirm a guarded action.
+- `receipt_id`
+- `plan_hash`
+- `nonce`
 
-A receipt is **not**:
-- a decision,
-- a recommendation,
-- a log entry,
-- a state snapshot,
-- a derived artifact.
+The server is the exclusive authority for:
 
-It is a **capability token** with strictly bounded semantics.
+- issuing receipts
+- validating receipts
+- consuming receipts
+- rejecting replay
 
----
-
-### 1.2 Receipt Identifier (`receipt_id`)
-
-A `receipt_id` is the **sole identifier** of a receipt.
-
-**Normative constraints:**
-
-- `receipt_id` **MUST** be:
-  - randomly generated,
-  - cryptographically unpredictable,
-  - single-use.
-- `receipt_id` **MUST NOT** be:
-  - derived from `plan_hash`,
-  - derived from intent content,
-  - reversible or guessable,
-  - stable across runs or retries.
-
-> Any implementation deriving `receipt_id` from deterministic inputs
-> **violates this specification**.
+Clients may present receipts back to the server, but they must not infer lifecycle or validation state locally.
 
 ---
 
-## 2. Authority Model
+## 2. Receipt Lifecycle
 
-### 2.1 Server Authority
+A receipt must be in exactly one lifecycle state:
 
-The server is the **exclusive authority** for:
-
-- receipt issuance,
-- receipt validation,
-- receipt consumption,
-- receipt lifecycle transitions.
-
-Clients **MUST NOT** infer, reconstruct, or simulate receipt state.
-
----
-
-### 2.2 Client Role
-
-Clients may:
-- hold a `receipt_id`,
-- present a `receipt_id` to the server,
-- record local evidence of receipt-related events.
-
-Clients **MUST NOT**:
-- validate a receipt,
-- consume a receipt,
-- infer receipt lifecycle state,
-- restore receipt state from local artifacts.
-
----
-
-## 3. Receipt Lifecycle
-
-### 3.1 Lifecycle States
-
-A receipt **MUST** be in exactly one of the following states:
-
-```
-missing → active → consumed
+```text
+missing -> active -> consumed
 ```
 
-No other lifecycle states are permitted.
+No additional lifecycle states are allowed.
 
-Specifically:
-- `expired`
-- `revoked`
-- `invalidated`
-- `pending`
-
-**MUST NOT** be introduced as lifecycle states.
-
-If expiration or policy rejection is implemented, it **MUST** be expressed as
-a **server-side validation failure**, not as a new lifecycle state.
+TTL expiry is enforced as a validation failure against an `active` receipt. It does not introduce a separate lifecycle state.
 
 ---
 
-### 3.2 State Semantics
+## 3. Receipt Shape
 
-- **missing**
-  - The receipt does not exist or is unknown to the server.
-- **active**
-  - The receipt exists and is eligible for consumption.
-- **consumed**
-  - The receipt has been irreversibly used.
+The runtime receipt binding is:
 
-State transitions are **monotonic** and **irreversible**.
+```json
+{
+  "receipt_id": "gr_10af2f50c2ce",
+  "plan_hash": "plan_97d4da118562",
+  "nonce": "nonce_1234567890abcdef",
+  "scope": "this_call_only"
+}
+```
 
----
+Normative constraints:
 
-## 4. Receipt Consumption
-
-### 4.1 Server-Side Consumption Only
-
-Receipt consumption **MUST** occur exclusively on the server.
-
-Clients **MUST NOT** mark a receipt as consumed under any circumstances.
-
----
-
-### 4.2 Idempotency (Mandatory)
-
-Receipt consumption **MUST be idempotent**.
-
-Given the same `receipt_id`:
-
-- The **first successful consume** transitions:
-  ```
-  active → consumed
-  ```
-- Any subsequent consume attempts **MUST**:
-  - return `state = consumed`,
-  - indicate idempotent handling,
-  - **MUST NOT** produce an error solely due to duplication.
-
-Idempotency is required to guarantee correctness under retries,
-network jitter, or concurrent calls.
+- `receipt_id` must be random and unpredictable.
+- `plan_hash` must bind the receipt to one computed execution plan.
+- `nonce` must be single-use for the bound receipt and plan.
+- `scope` is currently `this_call_only`.
 
 ---
 
-### 4.3 Validation Failures
+## 4. Execution Verification
 
-Consumption attempts **MUST** fail explicitly when:
+`EXECUTE` verification must check:
 
-- the receipt is `missing`,
-- the receipt is invalid,
-- server-side policy rejects the request.
+- `receipt_id`
+- `plan_hash`
+- `nonce`
+- TTL validity
+- lifecycle state
 
-Failures **MUST NOT** be inferred from client-side state.
+The server-authoritative execution key is:
 
----
+```text
+receipt_id + plan_hash + nonce
+```
 
-## 5. Purity of Assessment
+The first successful execution:
 
-### 5.1 `assess()` Purity
+- verifies the bound receipt
+- consumes the receipt atomically
+- records the execution key in the replay index
 
-The `assess()` function **MUST remain pure**.
-
-Specifically, `assess()`:
-
-- **MUST NOT**:
-  - read receipt state,
-  - read local logs or artifacts,
-  - perform I/O,
-  - call the server.
-- **MAY**:
-  - evaluate inputs,
-  - compute risk,
-  - produce advisory output.
-
-Receipt issuance or consumption **MUST NOT** occur inside `assess()`.
+Any later attempt with the same execution key must be rejected as replay.
 
 ---
 
-## 6. Local Artifacts and Logs
+## 5. Replay Protection
 
-### 6.1 Append-Only Logs (JSONL)
+The runtime must reject:
 
-Local append-only logs (e.g. `decisions.log.jsonl`) are **evidence records**, not
-state.
+- execution for a missing receipt
+- execution for a consumed receipt
+- execution after TTL expiry
+- execution with mismatched `plan_hash`
+- execution with mismatched `nonce`
+- execution where the execution key already exists in the replay index
 
-They may record events such as:
-- receipt issued,
-- receipt presented,
-- receipt consumed (acknowledged),
-- receipt errors.
-
-They **MUST NOT** be used to:
-
-- infer receipt lifecycle state,
-- restore receipt state,
-- validate or invalidate receipts.
-
-> Any implementation that reconstructs receipt state from local logs
-> **violates this specification**.
+Replay protection must be backed by persistent storage so behavior remains correct across restart.
 
 ---
 
-### 6.2 Local State Files
+## 6. Purity Boundary
 
-Local state files (e.g. `state.json`) are **non-authoritative**.
+`assess()` must remain pure.
 
-They **MUST NOT** be treated as:
-- receipt storage,
-- lifecycle sources,
-- recovery mechanisms.
+It must not:
 
-Receipt authority **never** resides in client storage.
+- read receipt state
+- read replay state
+- perform storage I/O
+- call transport or server layers
 
----
-
-## 7. Binding and Intent Association
-
-A receipt **MAY** be associated server-side with contextual metadata
-(e.g. intent, constraints, issuance context).
-
-However:
-
-- Such association **MUST NOT** be relied upon client-side for validation.
-- Clients **MUST NOT** compare `receipt_id` against plan hashes or intent data
-  to determine validity.
-
-All binding checks **MUST** occur on the server at consumption time.
+Receipt verification and consumption belong to the runtime and persistence layers, not the pure assessment module.
 
 ---
 
-## 8. Forbidden Designs (Normative)
+## 7. Persistence Authority
 
-The following designs are explicitly forbidden:
+Authoritative runtime correctness must not depend on mutable in-memory state.
 
-1. Deriving `receipt_id` from `plan_hash` or intent data.
-2. Client-side receipt validation or lifecycle inference.
-3. Receipt consumption outside the server.
-4. Introducing additional receipt lifecycle states.
-5. Reconstructing receipt state from local logs or files.
-6. Making `assess()` depend on receipt state or server calls.
+The mainline persistence layer must persist:
 
-Any implementation employing these designs is **non-compliant**.
+- receipts
+- replay index entries
+- append-only decision log events
 
----
-
-## 9. Versioning and Compliance
-
-This specification applies to all versions **≥ v0.2** unless explicitly
-superseded by a versioned replacement.
-
-Breaking this specification **requires**:
-- an explicit version bump,
-- a written justification,
-- a documented migration path.
-
-Silent deviation is not permitted.
-
-### Receipt Lifecycle Enforcement Location
-
-Receipt lifecycle enforcement MUST reside in guardrail-level modules.
-It MUST NOT be implemented in orchestration, transport, or server entrypoint layers.
-
-This constraint exists to prevent semantic drift caused by flow-level refactors.
+Append-only decision logs are evidence, not authority. They must not be used to reconstruct receipt lifecycle state.
 
 ---
 
-**End of Normative Specification**
+## 8. Enforcement Location
+
+Receipt lifecycle and replay enforcement must reside in receipt/persistence boundaries, not in ad hoc transport-layer state.
+
+This keeps execution control restart-safe, auditable, and reviewable.

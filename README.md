@@ -2,21 +2,27 @@
 
 **Stop bad AI coding decisions before they execute.**
 
-Decision Assistant is a **deterministic Cursor MCP server** that enforces decision‑time guardrails for risky engineering actions.  
-It does not “review” your code after the fact. It **interrupts execution at the moment of commitment** and emits a verifiable,
-machine‑readable **evidence payload** (including a confirmation receipt when required).
+Decision Assistant is a **deterministic MCP-based execution control component for AI coding workflows**.
+It evaluates one planned engineering action at a time, gates high-risk execution through receipts, rejects replay, and records append-only decision evidence.
 
-- Deterministic rules (**no LLM** in the decision path)
+- Deterministic assessment (**no LLM** in the decision path)
 - Guardrail modes: `ALLOW` / `REQUIRE_CONFIRM` / `BLOCK`
-- Receipt semantics: **random `receipt_id`**, **plan‑bound `plan_hash`**, **idempotent consumption**
-- Designed for “solo dev sanity” and CI‑grade evidence
+- Receipt-gated execution bound to `receipt_id + plan_hash + nonce`
+- Replay protection and append-only decision logs
+
+---
+
+## Scope / Direction
+
+The source of truth for Decision Assistant's product boundary and v1.0 direction is [docs/SCOPE_FREEZE_v1.0.md](docs/SCOPE_FREEZE_v1.0.md).
+
+If other documentation differs, follow `docs/SCOPE_FREEZE_v1.0.md`.
 
 ---
 
 ## What it does
 
-When a change looks dangerous (scope explosion, refactor black hole patterns, dependency churn, etc.),
-Decision Assistant returns a **guardrail decision**:
+Decision Assistant evaluates a single planned action and returns a **guardrail decision**:
 
 - `ALLOW` — proceed
 - `REQUIRE_CONFIRM` — blocked until explicit confirmation + receipt is provided
@@ -29,6 +35,7 @@ In `REQUIRE_CONFIRM`, it returns a **receipt**:
   "receipt": {
     "receipt_id": "gr_10af2f50c2ce",
     "plan_hash": "plan_97d4da118562",
+    "nonce": "nonce_1234567890abcdef",
     "scope": "this_call_only"
   },
   "confirmation": { "required": true },
@@ -41,15 +48,14 @@ To proceed, re-run with:
 - `confirm.mode = "EXECUTE"`
 - `confirm.receipt_id` (must be reused)
 - `confirm.plan_hash` (must match current plan hash)
+- `confirm.nonce` (must match the current receipt binding)
 
-If the plan changed, `EXECUTE` is rejected with `confirmation.rejected = true` and
-`error = STALE_RECEIPT_OR_PLAN_CHANGED` under `REQUIRE_CONFIRM`.
+`EXECUTE` verification checks receipt existence, active state, TTL validity, `plan_hash`, `nonce`, and replay state.
 
 If an active receipt already exists for the same `plan_hash`, the server may reuse
 that receipt instead of issuing a new one.
 
-Repeated `EXECUTE` with the same consumed receipt is idempotent and remains `ALLOW`
-with `already_executed = true`.
+Repeated `EXECUTE` with the same consumed execution key is rejected as replay.
 
 ---
 
@@ -139,10 +145,16 @@ npm run build
 
 ## Run tests
 
-### Semantic tests (receipt norms)
+### Build
 
 ```bash
-npm run test:semantics
+npm run build
+```
+
+### Machine contracts
+
+```bash
+npm run verify:machine-contracts
 ```
 
 ### Guardrail verification
@@ -151,7 +163,7 @@ npm run test:semantics
 npm run verify:guardrail
 ```
 
-Expected: both pass.
+Expected: all pass.
 
 ---
 
@@ -209,14 +221,17 @@ This fails the process if the evidence marker is missing or any step exits non-z
 Decision Assistant (this repo) is intentionally:
 
 - deterministic
-- local-first
-- decision infrastructure for engineering behavior
+- an MCP-based execution control component
+- focused on single-action assessment and receipt-gated execution
 
 It is **not**:
 
-- a general LLM agent
-- an auto-refactoring tool
-- a product analytics platform
+- a general governance platform
+- a responsibility attribution system
+- a boundary declaration system
+- a misuse-reporting product
+- a team approval workflow
+- a UI/dashboard project
 
 ---
 
@@ -229,7 +244,7 @@ Key invariants you must not break:
 - `assess()` stays **pure** (no fs/git/process/network)
 - `receipt_id` must be random, not derived from plan hash or intent
 - no extra lifecycle states beyond the normative set
-- receipt consumption must be idempotent
+- receipt consume must be atomic and replay must be rejected
 
 ---
 

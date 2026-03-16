@@ -6,6 +6,16 @@ Decision Assistant supports configurable thresholds and rules.
 
 Configuration is loaded from code defaults in v0.2.
 
+## Machine Contracts
+
+Mainline v1.0 machine contracts live under `config/schema/`:
+
+- `policy-config.schema.json` defines the deterministic policy and guardrail configuration shape.
+- `receipt.schema.json` defines the server-authoritative receipt record used for execution binding and replay checks.
+- `decision-log.schema.json` defines one append-only decision log event record.
+
+These schemas intentionally cover only the mainline action-gate model. They do not define `responsibility`, `boundary`, or `misuse_report` contracts.
+
 ## Guardrail Default Thresholds
 
 In v0.2, guardrail thresholds use fixed defaults to ensure consistent

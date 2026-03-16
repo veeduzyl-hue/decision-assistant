@@ -1,7 +1,7 @@
 # v0.1 Sample Flow — Refactor Time Blackhole
 
 ## Step 1: detect_triggers
-Input: examples/sample_signals.json
+Input: archive/examples/sample_signals.json
 
 Expected:
 - returns `signals` (same as input)

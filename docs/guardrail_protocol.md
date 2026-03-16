@@ -55,6 +55,7 @@ It binds user intent to a specific computed plan.
 {
   "receipt_id": "gr_0f4f9a816f64",
   "plan_hash": "plan_eefc62edd807",
+  "nonce": "nonce_4f9a816f64ab12cd",
   "scope": "this_call_only"
 }
 ```
@@ -63,6 +64,7 @@ Field semantics:
 
 - `receipt_id`: Opaque identifier for this confirmation opportunity.
 - `plan_hash`: Hash of the execution plan being confirmed.
+- `nonce`: Single-use execution nonce bound to the receipt and plan hash.
 - `scope`: Validity scope of the receipt (currently `this_call_only`).
 
 ---
@@ -84,6 +86,7 @@ type ConfirmInput =
       mode: "EXECUTE";
       receipt_id: string;
       plan_hash: string;
+      nonce: string;
     };
 ```
 
@@ -96,8 +99,9 @@ type ConfirmInput =
 
 Rules:
 
-- `EXECUTE` **must** provide both `receipt_id` and `plan_hash`.
-- If `plan_hash` does not match the current plan, confirmation is rejected.
+- `EXECUTE` **must** provide `receipt_id`, `plan_hash`, and `nonce`.
+- If `plan_hash` or `nonce` does not match the current plan binding, confirmation is rejected.
+- Replaying the same `receipt_id + plan_hash + nonce` after a successful execute is rejected.
 
 ---
 
@@ -115,6 +119,7 @@ A Guardrail response **must** include a `guardrail` field.
     "receipt": {
       "receipt_id": "gr_0f4f9a816f64",
       "plan_hash": "plan_eefc62edd807",
+      "nonce": "nonce_4f9a816f64ab12cd",
       "scope": "this_call_only"
     },
     "executed": false,
@@ -135,6 +140,7 @@ A Guardrail response **must** include a `guardrail` field.
     "receipt": {
       "receipt_id": "gr_0f4f9a816f64",
       "plan_hash": "plan_eefc62edd807",
+      "nonce": "nonce_4f9a816f64ab12cd",
       "scope": "this_call_only"
     },
     "executed": true,
@@ -190,7 +196,8 @@ A Guardrail response **must** include a `guardrail` field.
   "confirm": {
     "mode": "EXECUTE",
     "receipt_id": "gr_0f4f9a816f64",
-    "plan_hash": "plan_eefc62edd807"
+    "plan_hash": "plan_eefc62edd807",
+    "nonce": "nonce_4f9a816f64ab12cd"
   }
 }
 ```
@@ -212,7 +219,8 @@ A Guardrail response **must** include a `guardrail` field.
       "required": false,
       "confirmed": true,
       "confirmed_plan_hash": "plan_eefc62edd807",
-      "confirmed_receipt_id": "gr_0f4f9a816f64"
+      "confirmed_receipt_id": "gr_0f4f9a816f64",
+      "confirmed_nonce": "nonce_4f9a816f64ab12cd"
     }
   }
 }
