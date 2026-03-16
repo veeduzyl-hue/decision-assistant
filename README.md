@@ -2,7 +2,7 @@
 
 **Stop bad AI coding decisions before they execute.**
 
-Decision Assistant is a **deterministic Cursor MCP server** that enforces decision‑time guardrails for risky engineering actions.
+Decision Assistant is a **deterministic Cursor MCP server** that enforces decision‑time guardrails for risky engineering actions.  
 It does not “review” your code after the fact. It **interrupts execution at the moment of commitment** and emits a verifiable,
 machine‑readable **evidence payload** (including a confirmation receipt when required).
 
@@ -20,7 +20,7 @@ Decision Assistant returns a **guardrail decision**:
 
 - `ALLOW` — proceed
 - `REQUIRE_CONFIRM` — blocked until explicit confirmation + receipt is provided
-- `BLOCK` — hard stop (policy threshold exceeded)
+- `BLOCK` — hard stop (extreme safety valve / policy threshold exceeded)
 
 In `REQUIRE_CONFIRM`, it returns a **receipt**:
 
@@ -42,40 +42,46 @@ To proceed, re-run with:
 - `confirm.receipt_id` (must be reused)
 - `confirm.plan_hash` (must match current plan hash)
 
-If the plan changed, EXECUTE is rejected with `confirmation.rejected = true` and
+If the plan changed, `EXECUTE` is rejected with `confirmation.rejected = true` and
 `error = STALE_RECEIPT_OR_PLAN_CHANGED` under `REQUIRE_CONFIRM`.
+
 If an active receipt already exists for the same `plan_hash`, the server may reuse
 that receipt instead of issuing a new one.
-Repeated EXECUTE with the same consumed receipt is idempotent and remains `ALLOW`.
+
+Repeated `EXECUTE` with the same consumed receipt is idempotent and remains `ALLOW`
+with `already_executed = true`.
 
 ---
 
-## Quick start with Cursor (recommended: `npx` install)
+## Install in Cursor (recommended: `npx`)
 
-> **Goal:** run the MCP server locally and point Cursor to it **without cloning**.
-
-### 1) Configure Cursor MCP
-
-Add a server entry in Cursor MCP settings (UI varies by Cursor version).
-
-**Recommended config (no absolute repo path):**
+Add this to your Cursor MCP configuration:
 
 ```json
 {
   "mcpServers": {
     "decision-assistant": {
       "command": "npx",
-      "args": ["-y", "decision-assistant"]
+      "args": ["-y", "decision-assistant@0.3.1"]
     }
   }
 }
 ```
 
-Restart Cursor after saving settings.
+Then restart Cursor.
 
-> Notes
-> - This requires the package to be published to npm as `decision-assistant`.
-> - If you publish under a scope, change the args to `["@your-scope/decision-assistant"]`.
+### Verification
+
+After restarting Cursor, you should see:
+
+- `decision-assistant`
+- `4 tools enabled`
+
+### Notes
+
+- This package is published on npm as `decision-assistant`.
+- Pinning `@0.3.1` is recommended for reproducible verification.
+- After validation, you may switch to `decision-assistant@latest`.
 
 ---
 
@@ -131,13 +137,21 @@ npm run build
 
 ---
 
-## Run semantic tests (receipt norms)
+## Run tests
+
+### Semantic tests (receipt norms)
 
 ```bash
 npm run test:semantics
 ```
 
-Expected: all tests pass.
+### Guardrail verification
+
+```bash
+npm run verify:guardrail
+```
+
+Expected: both pass.
 
 ---
 
@@ -145,9 +159,9 @@ Expected: all tests pass.
 
 This repository includes a deterministic “server roundtrip” evidence demo that proves:
 
-1) `REQUIRE_CONFIRM` issues `receipt_id` + `plan_hash`
-2) `EXECUTE` succeeds only when the receipt matches the plan hash (and reuses `receipt_id`)
-3) stale confirmations are rejected and re-issued
+1. `REQUIRE_CONFIRM` issues `receipt_id` + `plan_hash`
+2. `EXECUTE` succeeds only when the receipt matches the plan hash
+3. stale confirmations are rejected and re-issued
 
 ### One command
 
@@ -157,7 +171,7 @@ npx tsx demo/demo_server_roundtrip.ts
 
 Expected tail marker:
 
-```
+```text
 PASS: server roundtrip evidence
 { "ok": true, "bundle": "server-roundtrip-evidence", "version": "v0.3d" }
 ```
@@ -196,7 +210,7 @@ Decision Assistant (this repo) is intentionally:
 
 - deterministic
 - local-first
-- “decision infrastructure” for engineering behavior
+- decision infrastructure for engineering behavior
 
 It is **not**:
 
@@ -215,33 +229,31 @@ Key invariants you must not break:
 - `assess()` stays **pure** (no fs/git/process/network)
 - `receipt_id` must be random, not derived from plan hash or intent
 - no extra lifecycle states beyond the normative set
-- consumption must be idempotent
+- receipt consumption must be idempotent
+
+---
+
+## Troubleshooting
+
+If you run:
+
+```bash
+npx decision-assistant@0.3.1
+```
+
+and nothing prints, this is **expected behavior**.
+
+`decision-assistant` runs as an MCP stdio server and waits for a client (such as Cursor) to connect.  
+It will not print interactive output when launched directly from the terminal.
+
+If Cursor still shows old behavior after a code change:
+
+- restart Cursor, or
+- toggle the MCP server off/on in **Tools & MCP**, or
+- temporarily pin the version explicitly in `.cursor/mcp.json`
 
 ---
 
 ## License
 
 See `LICENSE`.
-
-
-## Verification
-
-After restarting Cursor, you should see `decision-assistant (4 tools enabled)` in **Tools & MCP**.
-
-
-## Package Availability
-
-This package is published on npm as `decision-assistant`.
-
-## Troubleshooting
-
-If you run:
-
-```
-npx decision-assistant
-```
-
-and nothing prints, this is **expected behavior**.
-
-`decision-assistant` runs as an MCP stdio server and waits for a client (such as Cursor) to connect. 
-It will not print interactive output when launched directly from the terminal.
