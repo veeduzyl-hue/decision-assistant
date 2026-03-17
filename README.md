@@ -64,7 +64,7 @@ Repeated `EXECUTE` with the same consumed execution key is rejected as replay.
 Published package:
 
 ```bash
-npm install -g decision-assistant@0.5.0
+npm install -g decision-assistant@0.7.1
 ```
 
 Minimal runtime path:
@@ -75,7 +75,7 @@ decision-assistant
 
 This starts the MCP stdio server and waits for a client connection.
 
-Validated runtime floor for the current v0.5 release gate: Node.js 24+.
+Validated runtime floor for the current v0.7 release gate: Node.js 24+.
 
 Add this to your Cursor MCP configuration for the documented MCP startup path:
 
@@ -84,7 +84,7 @@ Add this to your Cursor MCP configuration for the documented MCP startup path:
   "mcpServers": {
     "decision-assistant": {
       "command": "npx",
-      "args": ["-y", "decision-assistant@0.5.0"]
+      "args": ["-y", "decision-assistant@0.7.1"]
     }
   }
 }
@@ -102,7 +102,7 @@ After restarting Cursor, you should see:
 ### Notes
 
 - This package is published on npm as `decision-assistant`.
-- Pinning `@0.5.0` is recommended for reproducible verification.
+- Pinning `@0.7.1` is recommended for reproducible verification.
 - After validation, you may switch to `decision-assistant@latest`.
 - The public package surface is the package identity, the `decision-assistant` bin, and the shipped `config/schema/*` machine-contract files.
 - Internal source layout and deep imports into `dist/*` are not public API.
@@ -287,7 +287,7 @@ Key invariants you must not break:
 If you run:
 
 ```bash
-npx decision-assistant@0.5.0
+npx decision-assistant@0.7.1
 ```
 
 and nothing prints, this is **expected behavior**.
